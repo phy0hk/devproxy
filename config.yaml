@@ -1,0 +1,9 @@
+server:
+    host: "127.0.0.1"
+    port: 8082
+
+proxy:
+    targets:
+        - name: "example"
+          path: "/api"
+          url: "https://example.com"
