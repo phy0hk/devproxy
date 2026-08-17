@@ -1,0 +1,14 @@
+# Build
+/bin/
+/dist/
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+
+# Temporary
+*.tmp
+*.log
