@@ -15,9 +15,10 @@ import (
 )
 
 const (
+	bootstrapChannel   = "v1"
 	cacheDirName       = ".devproxy"
 	binDirName         = "bin"
-	defaultDownloadURL = "https://github.com/phy0hk/devproxy/releases/latest/download"
+	defaultDownloadURL = "https://github.com/phy0hk/devproxy/releases/download/" + bootstrapChannel
 )
 
 func main() {
@@ -43,7 +44,15 @@ func run(args []string) error {
 func ensureBinary() (string, error) {
 	binaryPath := cachedBinaryPath()
 	if _, err := os.Stat(binaryPath); err == nil {
-		return binaryPath, nil
+		current, err := cachedBinaryIsCurrent(binaryPath)
+		if err != nil {
+			return "", err
+		}
+		if current {
+			return binaryPath, nil
+		}
+
+		fmt.Fprintf(os.Stderr, "devproxy %s binary is outdated, updating\n", bootstrapChannel)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return "", fmt.Errorf("check cached devproxy binary: %w", err)
 	}
@@ -71,7 +80,7 @@ func ensureBinary() (string, error) {
 }
 
 func cachedBinaryPath() string {
-	return filepath.Join(cacheDirName, binDirName, assetName())
+	return filepath.Join(cacheDirName, bootstrapChannel, binDirName, assetName())
 }
 
 func assetName() string {
@@ -138,20 +147,33 @@ func downloadBinary(url string, destination string) error {
 	return nil
 }
 
+func cachedBinaryIsCurrent(path string) (bool, error) {
+	if os.Getenv("DEVPROXY_SKIP_CHECKSUM") == "1" {
+		return true, nil
+	}
+
+	expected, err := expectedChecksum()
+	if err != nil {
+		return false, err
+	}
+
+	actual, err := sha256File(path)
+	if err != nil {
+		return false, err
+	}
+
+	return strings.EqualFold(actual, expected), nil
+}
+
 func verifyDownloadedBinary(path string) error {
 	if os.Getenv("DEVPROXY_SKIP_CHECKSUM") == "1" {
 		fmt.Fprintln(os.Stderr, "warning: checksum verification skipped")
 		return nil
 	}
 
-	checksums, err := downloadText(checksumURL())
+	expected, err := expectedChecksum()
 	if err != nil {
-		return fmt.Errorf("verify devproxy binary: download checksums.txt: %w", err)
-	}
-
-	expected, ok := checksumForAsset(checksums, assetName())
-	if !ok {
-		return fmt.Errorf("verify devproxy binary: no checksum found for %s", assetName())
+		return err
 	}
 
 	actual, err := sha256File(path)
@@ -164,6 +186,20 @@ func verifyDownloadedBinary(path string) error {
 	}
 
 	return nil
+}
+
+func expectedChecksum() (string, error) {
+	checksums, err := downloadText(checksumURL())
+	if err != nil {
+		return "", fmt.Errorf("verify devproxy binary: download checksums.txt: %w", err)
+	}
+
+	expected, ok := checksumForAsset(checksums, assetName())
+	if !ok {
+		return "", fmt.Errorf("verify devproxy binary: no checksum found for %s", assetName())
+	}
+
+	return expected, nil
 }
 
 func downloadText(url string) (string, error) {

@@ -67,13 +67,15 @@ POST /api/processes/{name}/restart
 
 ## Bootstrapper
 
-A small bootstrapper command lives at `cmd/devproxy-bootstrap`.
+A bootstrapper command lives at `cmd/devproxy-bootstrap`.
 
-Build it with:
+Build it as a static, smaller binary with:
 
 ```sh
-go build -o devproxy-bootstrap ./cmd/devproxy-bootstrap
+CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o devproxy-bootstrap ./cmd/devproxy-bootstrap
 ```
+
+`CGO_ENABLED=0` is important for NixOS and other systems that cannot run generic dynamically linked Linux binaries out of the box.
 
 When it runs, it:
 
@@ -81,13 +83,25 @@ When it runs, it:
 2. adds `.devproxy/` to `.gitignore` if missing,
 3. checks whether the platform-specific DevProxy binary already exists,
 4. downloads it from GitHub releases if missing,
-5. forwards all arguments to the real DevProxy binary.
+5. verifies `checksums.txt`,
+6. forwards all arguments to the real DevProxy binary.
 
-Default release URL base:
+If you want a much smaller repo bootstrapper, copy one of these scripts instead of the Go binary:
 
 ```text
-https://github.com/phy0hk/devproxy/releases/latest/download
+scripts/bootstrap/devproxy.sh
+scripts/bootstrap/devproxy.ps1
 ```
+
+The scripts are tiny and download/run the real DevProxy binary the same way.
+
+Default release URL base for the current bootstrapper:
+
+```text
+https://github.com/phy0hk/devproxy/releases/download/v1
+```
+
+Bootstrappers are pinned to a major release channel. The current bootstrapper is pinned to `v1`, so it only downloads DevProxy binaries from the `v1` release. A future breaking `v2` would require updating the bootstrapper to a `v2` bootstrapper.
 
 Override it with:
 
@@ -95,7 +109,9 @@ Override it with:
 DEVPROXY_DOWNLOAD_BASE_URL=https://example.com/devproxy ./devproxy-bootstrap up
 ```
 
-The bootstrapper verifies downloaded binaries against `checksums.txt` from the same release URL base. For local testing only, checksum verification can be skipped:
+The bootstrapper verifies downloaded binaries against `checksums.txt` from the same release URL base. It also checks whether the cached `.devproxy/v1/bin/...` binary still matches the current `v1` checksum. If the `v1` release was updated, the bootstrapper automatically downloads the newer `v1` binary.
+
+For local testing only, checksum verification can be skipped:
 
 ```sh
 DEVPROXY_SKIP_CHECKSUM=1 ./devproxy-bootstrap up
@@ -114,7 +130,16 @@ devproxy-windows-arm64.exe
 
 ## Release Workflow
 
-A GitHub Actions workflow lives at `.github/workflows/release.yml`. It runs on pushes to `main`/`master`, pull requests, manual `workflow_dispatch`, and tags like `v0.1.0`. Branch/PR/manual runs upload build artifacts; tag runs publish Linux, macOS, and Windows binaries plus `checksums.txt` to the GitHub release.
+A GitHub Actions workflow lives at `.github/workflows/release.yml`. It runs on pushes to `main`/`master`, pull requests, manual `workflow_dispatch`, and semver tags like `v1.2.3`.
+
+Behavior:
+
+- Pull requests build and upload artifacts only.
+- Pushes to `main`/`master` automatically update the `v1` release channel.
+- Manual workflow runs also update the `v1` release channel.
+- Semver tags like `v1.2.3` publish an exact versioned release.
+
+The `v1` channel release is what the current bootstrapper uses. This lets projects keep the same v1 bootstrapper while receiving compatible v1 DevProxy updates automatically.
 
 ## Planned Features
 
