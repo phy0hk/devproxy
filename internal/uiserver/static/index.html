@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content</head>="width=device-width, initial-scale=1" />
   <title>DevProxy</title>
   <link rel="stylesheet" href="/static/app.css" />
 </head>
@@ -24,20 +24,21 @@
       <div class="section-header">
         <div>
           <h2>Events</h2>
-          <div class="muted">Live proxy and process events</div>
+          <div class="muted">Select a process tab to see only that instance's logs and proxy requests.</div>
         </div>
       </div>
 
-      <nav class="tabs" aria-label="Event filters">
-        <button class="tab active" data-tab="all">All</button>
-        <button class="tab" data-tab="proxy">Proxy</button>
-        <button class="tab" data-tab="process">Process</button>
-        <button class="tab" data-tab="stdout">Stdout</button>
-        <button class="tab" data-tab="stderr">Stderr</button>
-        <button class="tab" data-tab="errors">Errors</button>
-      </nav>
+      <nav id="tabs" class="tabs" aria-label="Event filters"></nav>
 
-      <section id="events" class="events"></section>
+      <section class="terminal-panel" aria-label="Event terminal">
+        <div class="terminal-header">
+          <span class="terminal-dot red"></span>
+          <span class="terminal-dot yellow"></span>
+          <span class="terminal-dot green"></span>
+          <span id="terminal-title" class="terminal-title">all events</span>
+        </div>
+        <div id="events" class="terminal-body"></div>
+      </section>
     </section>
   </main>
 
