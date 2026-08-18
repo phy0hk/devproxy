@@ -247,7 +247,9 @@ function formatEvent(event) {
   }
 
   if (event.type === 'proxy.request') {
-    return event.method + ' ' + event.path + ' -> ' + event.status + ' (' + event.duration_ms + 'ms)';
+    const route = event.route ? ' route=' + event.route : ' no-route';
+    const upstream = event.upstream ? ' upstream=' + event.upstream : '';
+    return event.method + ' ' + event.path + ' -> ' + event.status + route + upstream + ' (' + event.duration_ms + 'ms)';
   }
 
   if (event.error) {
