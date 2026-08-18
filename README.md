@@ -45,8 +45,8 @@ The UI server runs on `server.ui`. It currently provides:
 
 - process cards with state, PID, exit code, working directory, and last error,
 - start/stop/restart buttons for each configured process,
-- event tabs for `All`, `Proxy`, `Process`, `Stdout`, `Stderr`, and `Errors`,
-- live event streaming from `/events`.
+- event tabs for `All`, `Proxy`, `Process`, `Stdout`, `Stderr`, `Errors`, plus one tab per configured process such as `frontend` or `backend`,
+- terminal-style colored event output streamed from `/events`.
 
 The UI files are embedded from:
 
@@ -114,7 +114,7 @@ devproxy-windows-arm64.exe
 
 ## Release Workflow
 
-A GitHub Actions release workflow lives at `.github/workflows/release.yml`. Pushing a tag like `v0.1.0` builds Linux, macOS, and Windows binaries, generates `checksums.txt`, and publishes all assets to the GitHub release.
+A GitHub Actions workflow lives at `.github/workflows/release.yml`. It runs on pushes to `main`/`master`, pull requests, manual `workflow_dispatch`, and tags like `v0.1.0`. Branch/PR/manual runs upload build artifacts; tag runs publish Linux, macOS, and Windows binaries plus `checksums.txt` to the GitHub release.
 
 ## Planned Features
 

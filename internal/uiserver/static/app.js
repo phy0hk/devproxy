@@ -1,12 +1,24 @@
 const statusElement = document.getElementById('status');
 const processesElement = document.getElementById('processes');
 const eventsElement = document.getElementById('events');
-const tabs = Array.from(document.querySelectorAll('.tab'));
+const tabsElement = document.getElementById('tabs');
+const terminalTitleElement = document.getElementById('terminal-title');
 const source = new EventSource('/events');
 
+const baseTabs = [
+  { id: 'all', label: 'All' },
+  { id: 'proxy', label: 'Proxy' },
+  { id: 'process', label: 'Process' },
+  { id: 'stdout', label: 'Stdout' },
+  { id: 'stderr', label: 'Stderr' },
+  { id: 'errors', label: 'Errors' },
+];
+
 let activeTab = 'all';
+let processNames = [];
 let allEvents = [];
 
+renderTabs();
 loadProcesses();
 
 source.onopen = () => {
@@ -29,18 +41,6 @@ source.addEventListener('devproxy', (message) => {
   }
 });
 
-for (const tab of tabs) {
-  tab.addEventListener('click', () => {
-    activeTab = tab.dataset.tab;
-
-    for (const item of tabs) {
-      item.classList.toggle('active', item === tab);
-    }
-
-    renderEvents();
-  });
-}
-
 async function loadProcesses() {
   try {
     const response = await fetch('/api/processes');
@@ -49,10 +49,58 @@ async function loadProcesses() {
       return;
     }
 
-    renderProcesses(await response.json());
+    const processes = await response.json();
+    processNames = processes.map((process) => process.name);
+
+    if (activeTab.startsWith('instance:') && !processNames.includes(activeTab.slice('instance:'.length))) {
+      activeTab = 'all';
+    }
+
+    renderProcesses(processes);
+    renderTabs();
+    renderEvents();
   } catch (error) {
     processesElement.innerHTML = '<div class="muted">failed to load processes: ' + error.message + '</div>';
   }
+}
+
+function renderTabs() {
+  tabsElement.innerHTML = '';
+
+  for (const tab of baseTabs) {
+    tabsElement.append(tabButton(tab.id, tab.label, false));
+  }
+
+  for (const name of processNames) {
+    tabsElement.append(tabButton('instance:' + name, name, true));
+  }
+
+  updateTerminalTitle();
+}
+
+function tabButton(id, label, isProcessTab) {
+  const button = document.createElement('button');
+  button.className = 'tab' + (isProcessTab ? ' process-tab' : '');
+  button.dataset.tab = id;
+  button.textContent = label;
+  button.classList.toggle('active', activeTab === id);
+  button.addEventListener('click', () => {
+    activeTab = id;
+    renderTabs();
+    renderEvents();
+  });
+
+  return button;
+}
+
+function updateTerminalTitle() {
+  if (activeTab.startsWith('instance:')) {
+    terminalTitleElement.textContent = activeTab.slice('instance:'.length) + ' events';
+    return;
+  }
+
+  const tab = baseTabs.find((item) => item.id === activeTab);
+  terminalTitleElement.textContent = (tab ? tab.label.toLowerCase() : activeTab) + ' events';
 }
 
 function renderProcesses(items) {
@@ -70,9 +118,15 @@ function renderProcesses(items) {
     const header = document.createElement('div');
     header.className = 'process-card-header';
 
-    const name = document.createElement('div');
+    const name = document.createElement('button');
     name.className = 'process-name';
     name.textContent = process.name;
+    name.title = 'Show only ' + process.name + ' events';
+    name.addEventListener('click', () => {
+      activeTab = 'instance:' + process.name;
+      renderTabs();
+      renderEvents();
+    });
 
     const state = document.createElement('div');
     state.className = 'state ' + process.state;
@@ -120,20 +174,21 @@ async function runProcessAction(name, action) {
 
     if (!response.ok) {
       const error = await response.text();
-      appendLocalError('process.' + action, '[' + name + '] ' + error.trim());
+      appendLocalError('process.' + action, '[' + name + '] ' + error.trim(), name);
       return;
     }
 
     renderProcesses(await response.json());
   } catch (error) {
-    appendLocalError('process.' + action, '[' + name + '] ' + error.message);
+    appendLocalError('process.' + action, '[' + name + '] ' + error.message, name);
   }
 }
 
-function appendLocalError(type, message) {
+function appendLocalError(type, message, processName) {
   allEvents.unshift({
     type,
     timestamp: new Date().toISOString(),
+    process: processName,
     error: message,
   });
   renderEvents();
@@ -163,21 +218,31 @@ function processMeta(process) {
 
 function renderEvents() {
   eventsElement.innerHTML = '';
+  updateTerminalTitle();
 
   const visibleEvents = allEvents.filter(matchesActiveTab);
   if (!visibleEvents.length) {
-    eventsElement.innerHTML = '<div class="muted">no events in this tab yet</div>';
+    const empty = document.createElement('div');
+    empty.className = 'terminal-empty';
+    empty.textContent = 'no events in this tab yet';
+    eventsElement.append(empty);
     return;
   }
 
-  for (const event of visibleEvents.slice(0, 300)) {
+  for (const event of visibleEvents.slice(0, 300).reverse()) {
     eventsElement.append(eventElement(event));
   }
+
+  eventsElement.scrollTop = eventsElement.scrollHeight;
 }
 
 function matchesActiveTab(event) {
   if (activeTab === 'all') {
     return true;
+  }
+
+  if (activeTab.startsWith('instance:')) {
+    return eventBelongsToInstance(event, activeTab.slice('instance:'.length));
   }
 
   if (activeTab === 'proxy') {
@@ -203,58 +268,129 @@ function matchesActiveTab(event) {
   return true;
 }
 
+function eventBelongsToInstance(event, name) {
+  if (event.process === name) {
+    return true;
+  }
+
+  if (event.route === name) {
+    return true;
+  }
+
+  return false;
+}
+
 function eventElement(event) {
-  const item = document.createElement('article');
-  item.className = 'event';
+  const item = document.createElement('div');
+  item.className = 'terminal-line ' + eventClasses(event).join(' ');
 
-  const header = document.createElement('div');
-  header.className = 'event-header';
+  const time = document.createElement('span');
+  time.className = 'terminal-time';
+  time.textContent = formatTime(event.timestamp);
 
-  const type = document.createElement('span');
-  type.className = 'type';
-  type.textContent = event.type || 'event';
+  const source = document.createElement('span');
+  source.className = 'terminal-source';
+  source.textContent = eventSource(event);
 
-  const timestamp = document.createElement('span');
-  timestamp.textContent = event.timestamp ? new Date(event.timestamp).toLocaleTimeString() : '';
+  const kind = document.createElement('span');
+  kind.className = 'terminal-kind';
+  kind.textContent = eventKind(event);
 
-  const body = document.createElement('pre');
-  body.textContent = formatEvent(event);
+  const message = document.createElement('span');
+  message.className = 'terminal-message';
+  message.textContent = formatEvent(event);
 
-  header.append(type, timestamp);
-  item.append(header, body);
+  item.append(time, source, kind, message);
   return item;
+}
+
+function eventClasses(event) {
+  const classes = [];
+
+  if (event.type === 'proxy.request') {
+    classes.push('proxy');
+    if (event.status >= 500) {
+      classes.push('error');
+    } else if (event.status >= 400) {
+      classes.push('warning');
+    } else {
+      classes.push('success');
+    }
+  }
+
+  if (event.type && event.type.startsWith('process.')) {
+    classes.push(event.type === 'process.output' ? event.stream : 'lifecycle');
+  }
+
+  if (event.error || event.type === 'process.failed' || event.type === 'process.output_error') {
+    classes.push('error');
+  }
+
+  return classes;
+}
+
+function eventSource(event) {
+  if (event.process) {
+    return '[' + event.process + ']';
+  }
+
+  if (event.route) {
+    return '[' + event.route + ']';
+  }
+
+  return '[devproxy]';
+}
+
+function eventKind(event) {
+  if (event.type === 'process.output') {
+    return event.stream + ' ›';
+  }
+
+  if (event.type === 'proxy.request') {
+    return 'proxy ›';
+  }
+
+  return (event.type || 'event') + ' ›';
 }
 
 function formatEvent(event) {
   if (event.type === 'process.output') {
-    return '[' + event.process + ':' + event.stream + '] ' + event.message;
+    return event.message;
   }
 
   if (event.type === 'process.started') {
-    return '[' + event.process + '] started: ' + event.message;
+    return 'started: ' + event.message;
   }
 
   if (event.type === 'process.stopping') {
-    return '[' + event.process + '] stopping';
+    return 'stopping';
   }
 
   if (event.type === 'process.exited') {
-    return '[' + event.process + '] exited with code ' + event.exit_code + (event.error ? ': ' + event.error : '');
+    return 'exited with code ' + event.exit_code + (event.error ? ': ' + event.error : '');
   }
 
   if (event.type === 'process.failed') {
-    return '[' + event.process + '] failed: ' + event.error;
+    return 'failed: ' + event.error;
   }
 
   if (event.type === 'proxy.request') {
-    const route = event.route ? ' route=' + event.route : ' no-route';
+    const route = event.route ? 'route=' + event.route : 'no-route';
     const upstream = event.upstream ? ' upstream=' + event.upstream : '';
-    return event.method + ' ' + event.path + ' -> ' + event.status + route + upstream + ' (' + event.duration_ms + 'ms)';
+    return event.method + ' ' + event.path + ' -> ' + event.status + ' ' + route + upstream + ' (' + event.duration_ms + 'ms)';
   }
 
   if (event.error) {
     return event.error;
   }
 
-  return JSON.stringify(event, null, 2);
+  return JSON.stringify(event);
+}
+
+function formatTime(timestamp) {
+  if (!timestamp) {
+    return '--:--:--';
+  }
+
+  return new Date(timestamp).toLocaleTimeString();
 }
