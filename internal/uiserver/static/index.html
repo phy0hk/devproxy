@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DevProxy</title>
+  <link rel="stylesheet" href="/static/app.css" />
+</head>
+<body>
+  <header>
+    <h1>DevProxy</h1>
+    <div id="status" class="connection-status">connecting…</div>
+  </header>
+
+  <main>
+    <section>
+      <h2>Processes</h2>
+      <div id="processes" class="process-grid">
+        <div class="muted">loading processes…</div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-header">
+        <div>
+          <h2>Events</h2>
+          <div class="muted">Live proxy and process events</div>
+        </div>
+      </div>
+
+      <nav class="tabs" aria-label="Event filters">
+        <button class="tab active" data-tab="all">All</button>
+        <button class="tab" data-tab="proxy">Proxy</button>
+        <button class="tab" data-tab="process">Process</button>
+        <button class="tab" data-tab="stdout">Stdout</button>
+        <button class="tab" data-tab="stderr">Stderr</button>
+        <button class="tab" data-tab="errors">Errors</button>
+      </nav>
+
+      <section id="events" class="events"></section>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

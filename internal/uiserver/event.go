@@ -55,7 +55,7 @@ func handleEvents(
 
 			fmt.Fprintf(
 				w,
-				"event: request\n",
+				"event: devproxy\n",
 			)
 
 			fmt.Fprintf(

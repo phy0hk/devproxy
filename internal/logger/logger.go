@@ -62,6 +62,7 @@ func (l *Logger) Middleware(next http.Handler) http.Handler {
 		}
 
 		entry := event.RequestEvent{
+			Type:         "proxy.request",
 			ID:           "",
 			Timestamp:    start,
 			Method:       r.Method,
@@ -73,7 +74,7 @@ func (l *Logger) Middleware(next http.Handler) http.Handler {
 		}
 
 		log.Printf(
-			"%s %s -> %d (%s)",
+			"%s %s -> %d (%dms)",
 			entry.Method,
 			entry.Path,
 			entry.Status,

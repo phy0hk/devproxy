@@ -1,0 +1,50 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build release assets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Test
+        run: go test ./...
+
+      - name: Build binaries
+        run: |
+          mkdir -p dist
+          GOOS=linux GOARCH=amd64 go build -ldflags "-X main.version=${{ github.ref_name }}" -o dist/devproxy-linux-amd64 ./cmd/devproxy
+          GOOS=linux GOARCH=arm64 go build -ldflags "-X main.version=${{ github.ref_name }}" -o dist/devproxy-linux-arm64 ./cmd/devproxy
+          GOOS=darwin GOARCH=amd64 go build -ldflags "-X main.version=${{ github.ref_name }}" -o dist/devproxy-darwin-amd64 ./cmd/devproxy
+          GOOS=darwin GOARCH=arm64 go build -ldflags "-X main.version=${{ github.ref_name }}" -o dist/devproxy-darwin-arm64 ./cmd/devproxy
+          GOOS=windows GOARCH=amd64 go build -ldflags "-X main.version=${{ github.ref_name }}" -o dist/devproxy-windows-amd64.exe ./cmd/devproxy
+          GOOS=windows GOARCH=arm64 go build -ldflags "-X main.version=${{ github.ref_name }}" -o dist/devproxy-windows-arm64.exe ./cmd/devproxy
+          GOOS=linux GOARCH=amd64 go build -o dist/devproxy-bootstrap-linux-amd64 ./cmd/devproxy-bootstrap
+          GOOS=linux GOARCH=arm64 go build -o dist/devproxy-bootstrap-linux-arm64 ./cmd/devproxy-bootstrap
+          GOOS=darwin GOARCH=amd64 go build -o dist/devproxy-bootstrap-darwin-amd64 ./cmd/devproxy-bootstrap
+          GOOS=darwin GOARCH=arm64 go build -o dist/devproxy-bootstrap-darwin-arm64 ./cmd/devproxy-bootstrap
+          GOOS=windows GOARCH=amd64 go build -o dist/devproxy-bootstrap-windows-amd64.exe ./cmd/devproxy-bootstrap
+          GOOS=windows GOARCH=arm64 go build -o dist/devproxy-bootstrap-windows-arm64.exe ./cmd/devproxy-bootstrap
+
+      - name: Generate checksums
+        working-directory: dist
+        run: sha256sum * > checksums.txt
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*

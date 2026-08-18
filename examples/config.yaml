@@ -1,9 +1,32 @@
 server:
+  proxy:
     host: "127.0.0.1"
-    port: 8083
+    port: 8082
+  ui:
+    host: "127.0.0.1"
+    port: 8081
+
+processes:
+  - name: frontend
+    command: pnpm dev
+    working_dir: ./frontend
+    env:
+      PORT: "3000"
+
+  - name: backend
+    command: pnpm start:dev
+    working_dir: ./backend
+    env:
+      PORT: "4000"
 
 proxy:
-    targets:
-        - name: "example"
-          path: "/api"
-          url: "https://example.com"
+  targets:
+    - name: frontend
+      path: /
+      url: http://127.0.0.1:3000
+      rewrite: false
+
+    - name: api
+      path: /api
+      url: http://127.0.0.1:4000
+      rewrite: true
