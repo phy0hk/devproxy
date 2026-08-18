@@ -1,9 +1,18 @@
 server:
-    host: "127.0.0.1"
-    port: 8082
+    proxy:
+        host: "127.0.0.1"
+        port: 8082
+
+    ui:
+        host: "127.0.0.1"
+        port: 8081
 
 proxy:
     targets:
-        - name: "example"
-          path: "/api"
-          url: "https://example.com"
+        - name: api
+          path: /api
+          url: https://api.example.com
+
+        - name: users
+          path: /api/users
+          url: https://users.example.com
