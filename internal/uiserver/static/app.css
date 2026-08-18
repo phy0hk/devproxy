@@ -1,0 +1,174 @@
+:root {
+  color-scheme: dark;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #0f172a;
+  color: #e2e8f0;
+}
+
+body {
+  margin: 0;
+  background: #0f172a;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid #1e293b;
+  background: #020617;
+}
+
+h1,
+h2 {
+  margin: 0;
+}
+
+h1 {
+  font-size: 18px;
+}
+
+h2 {
+  margin-bottom: 12px;
+  font-size: 15px;
+  color: #cbd5e1;
+}
+
+main {
+  display: grid;
+  gap: 20px;
+  padding: 20px;
+}
+
+button {
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #e2e8f0;
+  cursor: pointer;
+  font: inherit;
+  padding: 6px 10px;
+}
+
+button:hover:not(:disabled) {
+  border-color: #38bdf8;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.muted,
+.connection-status {
+  color: #94a3b8;
+  font-size: 14px;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.process-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.process-card,
+.event {
+  border: 1px solid #1e293b;
+  border-radius: 10px;
+  background: #020617;
+  padding: 12px;
+}
+
+.process-card-header,
+.event-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.process-name,
+.type {
+  color: #38bdf8;
+  font-weight: 700;
+}
+
+.state {
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: #1e293b;
+  color: #cbd5e1;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.state.running {
+  background: #064e3b;
+  color: #a7f3d0;
+}
+
+.state.failed {
+  background: #7f1d1d;
+  color: #fecaca;
+}
+
+.state.exited,
+.state.stopping {
+  background: #78350f;
+  color: #fde68a;
+}
+
+.process-meta,
+.event-header {
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.process-command {
+  margin-top: 8px;
+  color: #cbd5e1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  word-break: break-word;
+}
+
+.process-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.tab.active {
+  border-color: #38bdf8;
+  background: #082f49;
+  color: #bae6fd;
+}
+
+.events {
+  display: grid;
+  gap: 10px;
+}
+
+pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #cbd5e1;
+}

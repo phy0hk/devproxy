@@ -22,7 +22,12 @@ func TestBusPublish(t *testing.T) {
 	bus.Publish(expected)
 
 	select {
-	case got := <-sub:
+	case event := <-sub:
+		got, ok := event.(RequestEvent)
+		if !ok {
+			t.Fatalf("got event type %T, want RequestEvent", event)
+		}
+
 		if got.ID != expected.ID {
 			t.Fatalf(
 				"got ID %q, want %q",

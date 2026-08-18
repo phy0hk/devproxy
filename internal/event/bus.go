@@ -2,7 +2,9 @@ package event
 
 import "sync"
 
-type Subscriber chan RequestEvent
+type Event interface{}
+
+type Subscriber chan Event
 
 type Bus struct {
 	mu          sync.RWMutex
@@ -34,7 +36,7 @@ func (b *Bus) Unsubscribe(ch Subscriber) {
 	close(ch)
 }
 
-func (b *Bus) Publish(event RequestEvent) {
+func (b *Bus) Publish(event Event) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
