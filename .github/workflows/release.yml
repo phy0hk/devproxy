@@ -11,7 +11,7 @@ on:
       - main
       - master
     tags:
-      - "v*"
+      - "v*.*.*"
 
 permissions:
   contents: write
@@ -23,6 +23,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -32,35 +34,95 @@ jobs:
       - name: Test
         run: go test ./...
 
+      - name: Resolve release channel
+        id: release
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            tag="${GITHUB_REF_NAME}"
+            channel="${tag%%.*}"
+            publish="true"
+            prerelease="false"
+          elif [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            tag=""
+            channel="v1"
+            publish="false"
+            prerelease="false"
+          else
+            tag="v1"
+            channel="v1"
+            publish="true"
+            prerelease="true"
+          fi
+
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "channel=${channel}" >> "$GITHUB_OUTPUT"
+          echo "publish=${publish}" >> "$GITHUB_OUTPUT"
+          echo "prerelease=${prerelease}" >> "$GITHUB_OUTPUT"
+
       - name: Build binaries
+        shell: bash
         run: |
           mkdir -p dist
-          GOOS=linux GOARCH=amd64 go build -ldflags "-X main.version=${{ github.ref_name }}" -o dist/devproxy-linux-amd64 ./cmd/devproxy
-          GOOS=linux GOARCH=arm64 go build -ldflags "-X main.version=${{ github.ref_name }}" -o dist/devproxy-linux-arm64 ./cmd/devproxy
-          GOOS=darwin GOARCH=amd64 go build -ldflags "-X main.version=${{ github.ref_name }}" -o dist/devproxy-darwin-amd64 ./cmd/devproxy
-          GOOS=darwin GOARCH=arm64 go build -ldflags "-X main.version=${{ github.ref_name }}" -o dist/devproxy-darwin-arm64 ./cmd/devproxy
-          GOOS=windows GOARCH=amd64 go build -ldflags "-X main.version=${{ github.ref_name }}" -o dist/devproxy-windows-amd64.exe ./cmd/devproxy
-          GOOS=windows GOARCH=arm64 go build -ldflags "-X main.version=${{ github.ref_name }}" -o dist/devproxy-windows-arm64.exe ./cmd/devproxy
-          GOOS=linux GOARCH=amd64 go build -o dist/devproxy-bootstrap-linux-amd64 ./cmd/devproxy-bootstrap
-          GOOS=linux GOARCH=arm64 go build -o dist/devproxy-bootstrap-linux-arm64 ./cmd/devproxy-bootstrap
-          GOOS=darwin GOARCH=amd64 go build -o dist/devproxy-bootstrap-darwin-amd64 ./cmd/devproxy-bootstrap
-          GOOS=darwin GOARCH=arm64 go build -o dist/devproxy-bootstrap-darwin-arm64 ./cmd/devproxy-bootstrap
-          GOOS=windows GOARCH=amd64 go build -o dist/devproxy-bootstrap-windows-amd64.exe ./cmd/devproxy-bootstrap
-          GOOS=windows GOARCH=arm64 go build -o dist/devproxy-bootstrap-windows-arm64.exe ./cmd/devproxy-bootstrap
+          VERSION="${{ steps.release.outputs.tag }}"
+          if [ -z "${VERSION}" ]; then
+            VERSION="${{ steps.release.outputs.channel }}-${{ github.sha }}"
+          fi
+          DEVPROXY_LDFLAGS="-s -w -X main.version=${VERSION}"
+          BOOTSTRAP_LDFLAGS="-s -w"
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "${DEVPROXY_LDFLAGS}" -o dist/devproxy-linux-amd64 ./cmd/devproxy
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "${DEVPROXY_LDFLAGS}" -o dist/devproxy-linux-arm64 ./cmd/devproxy
+          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags "${DEVPROXY_LDFLAGS}" -o dist/devproxy-darwin-amd64 ./cmd/devproxy
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "${DEVPROXY_LDFLAGS}" -o dist/devproxy-darwin-arm64 ./cmd/devproxy
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "${DEVPROXY_LDFLAGS}" -o dist/devproxy-windows-amd64.exe ./cmd/devproxy
+          CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -trimpath -ldflags "${DEVPROXY_LDFLAGS}" -o dist/devproxy-windows-arm64.exe ./cmd/devproxy
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "${BOOTSTRAP_LDFLAGS}" -o dist/devproxy-bootstrap-linux-amd64 ./cmd/devproxy-bootstrap
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "${BOOTSTRAP_LDFLAGS}" -o dist/devproxy-bootstrap-linux-arm64 ./cmd/devproxy-bootstrap
+          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags "${BOOTSTRAP_LDFLAGS}" -o dist/devproxy-bootstrap-darwin-amd64 ./cmd/devproxy-bootstrap
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "${BOOTSTRAP_LDFLAGS}" -o dist/devproxy-bootstrap-darwin-arm64 ./cmd/devproxy-bootstrap
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "${BOOTSTRAP_LDFLAGS}" -o dist/devproxy-bootstrap-windows-amd64.exe ./cmd/devproxy-bootstrap
+          CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -trimpath -ldflags "${BOOTSTRAP_LDFLAGS}" -o dist/devproxy-bootstrap-windows-arm64.exe ./cmd/devproxy-bootstrap
+          cp scripts/bootstrap/devproxy.sh dist/devproxy-bootstrap.sh
+          cp scripts/bootstrap/devproxy.ps1 dist/devproxy-bootstrap.ps1
 
       - name: Generate checksums
         working-directory: dist
         run: sha256sum * > checksums.txt
 
       - name: Upload build artifact
-        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        if: ${{ steps.release.outputs.publish != 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: devproxy-${{ github.sha }}
           path: dist/*
 
+      - name: Move autorelease channel tag
+        if: ${{ steps.release.outputs.publish == 'true' && !startsWith(github.ref, 'refs/tags/') }}
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f "${{ steps.release.outputs.tag }}" "${GITHUB_SHA}"
+          git push --force origin "refs/tags/${{ steps.release.outputs.tag }}"
+
       - name: Publish release
-        if: ${{ startsWith(github.ref, 'refs/tags/') }}
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*
+        if: ${{ steps.release.outputs.publish == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          tag="${{ steps.release.outputs.tag }}"
+          title="DevProxy $tag"
+          notes="Automated DevProxy release for channel ${{ steps.release.outputs.channel }}."
+          prerelease_flag=""
+          if [ "${{ steps.release.outputs.prerelease }}" = "true" ]; then
+            prerelease_flag="--prerelease"
+          fi
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release edit "$tag" --title "$title" --notes "$notes" $prerelease_flag
+          else
+            gh release create "$tag" --target "${GITHUB_SHA}" --title "$title" --notes "$notes" $prerelease_flag
+          fi
+
+          gh release upload "$tag" dist/* --clobber
