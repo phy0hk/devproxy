@@ -11,8 +11,10 @@ import (
 )
 
 type Route struct {
-	Path   string
-	Target *httputil.ReverseProxy
+	Name     string
+	Path     string
+	Upstream string
+	Target   *httputil.ReverseProxy
 }
 
 type Proxy struct {
@@ -32,13 +34,16 @@ func New(cfg *config.Config) (*Proxy, error) {
 			)
 		}
 
+		targetName := target.Name
 		targetPath := target.Path
+		targetURL := target.URL
+		targetRewrite := target.Rewrite
 
 		proxy := &httputil.ReverseProxy{
 			Rewrite: func(req *httputil.ProxyRequest) {
 				req.SetURL(u)
 
-				if target.Rewrite {
+				if targetRewrite {
 					req.Out.URL.Path = strings.TrimPrefix(
 						req.In.URL.Path,
 						targetPath,
@@ -56,8 +61,10 @@ func New(cfg *config.Config) (*Proxy, error) {
 		}
 
 		routes = append(routes, Route{
-			Path:   targetPath,
-			Target: proxy,
+			Name:     targetName,
+			Path:     targetPath,
+			Upstream: targetURL,
+			Target:   proxy,
 		})
 	}
 
@@ -70,10 +77,16 @@ func (p *Proxy) Handler(w http.ResponseWriter, r *http.Request) {
 	route := p.findRoute(r.URL.Path)
 
 	if route == nil {
-		http.NotFound(w, r)
+		http.Error(
+			w,
+			fmt.Sprintf("devproxy: no proxy route matched %s", r.URL.Path),
+			http.StatusNotFound,
+		)
 		return
 	}
 
+	w.Header().Set("X-DevProxy-Route", route.Name)
+	w.Header().Set("X-DevProxy-Upstream", route.Upstream)
 	route.Target.ServeHTTP(w, r)
 }
 func (p *Proxy) findRoute(path string) *Route {
@@ -96,6 +109,10 @@ func (p *Proxy) findRoute(path string) *Route {
 }
 
 func matchesPath(requestPath, routePath string) bool {
+	if routePath == "/" {
+		return strings.HasPrefix(requestPath, "/")
+	}
+
 	return requestPath == routePath ||
 		strings.HasPrefix(requestPath, routePath+"/")
 }

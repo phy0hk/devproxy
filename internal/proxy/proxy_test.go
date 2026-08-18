@@ -46,6 +46,18 @@ func TestMatchesPath(t *testing.T) {
 			routePath:   "/api",
 			want:        false,
 		},
+		{
+			name:        "root route matches root",
+			requestPath: "/",
+			routePath:   "/",
+			want:        true,
+		},
+		{
+			name:        "root route matches child path",
+			requestPath: "/assets/app.js",
+			routePath:   "/",
+			want:        true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -131,6 +143,138 @@ func TestFindRouteLongestMatch(t *testing.T) {
 		})
 	}
 }
+func TestFindRouteWithRootFallback(t *testing.T) {
+	proxy := &Proxy{
+		routes: []Route{
+			{
+				Name: "backend",
+				Path: "/api",
+			},
+			{
+				Name: "frontend",
+				Path: "/",
+			},
+		},
+	}
+
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{
+			name: "api route wins over root",
+			path: "/api",
+			want: "/api",
+		},
+		{
+			name: "api child route wins over root",
+			path: "/api/users",
+			want: "/api",
+		},
+		{
+			name: "frontend root route",
+			path: "/",
+			want: "/",
+		},
+		{
+			name: "frontend child path uses root route",
+			path: "/dashboard",
+			want: "/",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			route := proxy.findRoute(tt.path)
+			if route == nil {
+				t.Fatalf("expected route %q, got nil", tt.want)
+			}
+
+			if route.Path != tt.want {
+				t.Fatalf("got route %q, want %q", route.Path, tt.want)
+			}
+		})
+	}
+}
+
+func TestProxyRootFallbackWithBackendPrefix(t *testing.T) {
+	frontend := httptest.NewServer(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte("frontend:" + r.URL.Path))
+		}),
+	)
+	defer frontend.Close()
+
+	backend := httptest.NewServer(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte("backend:" + r.URL.Path))
+		}),
+	)
+	defer backend.Close()
+
+	cfg := &config.Config{
+		Proxy: config.ProxyConfig{
+			Targets: []config.TargetConfig{
+				{
+					Name: "backend",
+					Path: "/api",
+					URL:  backend.URL,
+				},
+				{
+					Name: "frontend",
+					Path: "/",
+					URL:  frontend.URL,
+				},
+			},
+		},
+	}
+
+	proxy, err := New(cfg)
+	if err != nil {
+		t.Fatalf("create proxy: %v", err)
+	}
+
+	tests := []struct {
+		path string
+		want string
+	}{
+		{
+			path: "/api",
+			want: "backend:/api",
+		},
+		{
+			path: "/api/users",
+			want: "backend:/api/users",
+		},
+		{
+			path: "/",
+			want: "frontend:/",
+		},
+		{
+			path: "/dashboard",
+			want: "frontend:/dashboard",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "http://localhost"+tt.path, nil)
+			rec := httptest.NewRecorder()
+
+			proxy.Handler(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("got status %d, want %d", rec.Code, http.StatusOK)
+			}
+
+			if body := rec.Body.String(); body != tt.want {
+				t.Fatalf("got body %q, want %q", body, tt.want)
+			}
+		})
+	}
+}
+
 func TestProxy(t *testing.T) {
 	tests := []struct {
 		name         string

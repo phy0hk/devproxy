@@ -67,19 +67,33 @@ func (l *Logger) Middleware(next http.Handler) http.Handler {
 			Timestamp:    start,
 			Method:       r.Method,
 			Path:         r.URL.RequestURI(),
+			Route:        writer.Header().Get("X-DevProxy-Route"),
+			Upstream:     writer.Header().Get("X-DevProxy-Upstream"),
 			Status:       status,
 			DurationMS:   time.Since(start).Milliseconds(),
 			RequestSize:  r.ContentLength,
 			ResponseSize: writer.responseSize,
 		}
 
-		log.Printf(
-			"%s %s -> %d (%dms)",
-			entry.Method,
-			entry.Path,
-			entry.Status,
-			entry.DurationMS,
-		)
+		if entry.Route == "" {
+			log.Printf(
+				"%s %s -> %d no-route (%dms)",
+				entry.Method,
+				entry.Path,
+				entry.Status,
+				entry.DurationMS,
+			)
+		} else {
+			log.Printf(
+				"%s %s -> %d route=%s upstream=%s (%dms)",
+				entry.Method,
+				entry.Path,
+				entry.Status,
+				entry.Route,
+				entry.Upstream,
+				entry.DurationMS,
+			)
+		}
 
 		if l.bus != nil {
 			l.bus.Publish(entry)
