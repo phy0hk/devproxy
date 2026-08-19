@@ -6,12 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 const (
@@ -19,7 +21,10 @@ const (
 	cacheDirName       = ".devproxy"
 	binDirName         = "bin"
 	defaultDownloadURL = "https://github.com/phy0hk/devproxy/releases/download/" + bootstrapChannel
+	downloadAttempts   = 3
 )
+
+var httpClient = &http.Client{Timeout: 2 * time.Minute}
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -112,36 +117,39 @@ func downloadBaseURL() string {
 func downloadBinary(url string, destination string) error {
 	fmt.Fprintf(os.Stderr, "devproxy binary not found, downloading %s\n", url)
 
-	response, err := http.Get(url)
+	err := withDownloadRetry(func() error {
+		response, err := get(url)
+		if err != nil {
+			return err
+		}
+		defer response.Body.Close()
+
+		tmp := destination + ".tmp"
+		file, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+		if err != nil {
+			return fmt.Errorf("create temporary devproxy binary: %w", err)
+		}
+
+		_, copyErr := io.Copy(file, response.Body)
+		closeErr := file.Close()
+		if copyErr != nil {
+			_ = os.Remove(tmp)
+			return fmt.Errorf("write devproxy binary: %w", copyErr)
+		}
+		if closeErr != nil {
+			_ = os.Remove(tmp)
+			return fmt.Errorf("close temporary devproxy binary: %w", closeErr)
+		}
+
+		if err := os.Rename(tmp, destination); err != nil {
+			_ = os.Remove(tmp)
+			return fmt.Errorf("install devproxy binary: %w", err)
+		}
+
+		return nil
+	})
 	if err != nil {
 		return fmt.Errorf("download devproxy binary: %w", err)
-	}
-	defer response.Body.Close()
-
-	if response.StatusCode < 200 || response.StatusCode > 299 {
-		return fmt.Errorf("download devproxy binary: %s", response.Status)
-	}
-
-	tmp := destination + ".tmp"
-	file, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
-	if err != nil {
-		return fmt.Errorf("create temporary devproxy binary: %w", err)
-	}
-
-	_, copyErr := io.Copy(file, response.Body)
-	closeErr := file.Close()
-	if copyErr != nil {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("write devproxy binary: %w", copyErr)
-	}
-	if closeErr != nil {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("close temporary devproxy binary: %w", closeErr)
-	}
-
-	if err := os.Rename(tmp, destination); err != nil {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("install devproxy binary: %w", err)
 	}
 
 	return nil
@@ -203,22 +211,79 @@ func expectedChecksum() (string, error) {
 }
 
 func downloadText(url string) (string, error) {
-	response, err := http.Get(url)
-	if err != nil {
-		return "", err
+	var text string
+	err := withDownloadRetry(func() error {
+		response, err := get(url)
+		if err != nil {
+			return err
+		}
+		defer response.Body.Close()
+
+		data, err := io.ReadAll(response.Body)
+		if err != nil {
+			return err
+		}
+
+		text = string(data)
+		return nil
+	})
+
+	return text, err
+}
+
+func withDownloadRetry(download func() error) error {
+	var lastErr error
+
+	for attempt := 1; attempt <= downloadAttempts; attempt++ {
+		lastErr = download()
+		if lastErr == nil {
+			return nil
+		}
+		if attempt == downloadAttempts || !isRetryableDownloadError(lastErr) {
+			break
+		}
+
+		fmt.Fprintf(os.Stderr, "download failed (%v), retrying\n", lastErr)
+		time.Sleep(time.Duration(attempt) * time.Second)
 	}
-	defer response.Body.Close()
+
+	return lastErr
+}
+
+func get(url string) (*http.Response, error) {
+	response, err := httpClient.Get(url)
+	if err != nil {
+		return nil, err
+	}
 
 	if response.StatusCode < 200 || response.StatusCode > 299 {
-		return "", fmt.Errorf("%s", response.Status)
+		defer response.Body.Close()
+		return nil, downloadStatusError(response.StatusCode)
 	}
 
-	data, err := io.ReadAll(response.Body)
-	if err != nil {
-		return "", err
+	return response, nil
+}
+
+type downloadStatusError int
+
+func (e downloadStatusError) Error() string {
+	return http.StatusText(int(e))
+}
+
+func isRetryableDownloadError(err error) bool {
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
 	}
 
-	return string(data), nil
+	var statusErr downloadStatusError
+	if errors.As(err, &statusErr) {
+		status := int(statusErr)
+		return status == http.StatusTooManyRequests || status >= 500
+	}
+
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "connection reset") || strings.Contains(message, "reset by peer") || strings.Contains(message, "unexpected eof")
 }
 
 func checksumForAsset(checksums string, asset string) (string, bool) {
