@@ -72,28 +72,28 @@ A bootstrapper command lives at `cmd/devproxy-bootstrap`.
 Build it as a static, smaller binary with:
 
 ```sh
-CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o devproxy-bootstrap ./cmd/devproxy-bootstrap
+CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -buildid=" -o devproxy-bootstrap ./cmd/devproxy-bootstrap
 ```
 
 `CGO_ENABLED=0` is important for NixOS and other systems that cannot run generic dynamically linked Linux binaries out of the box.
 
 When it runs, it:
 
-1. creates `.devproxy/bin`,
+1. creates `.devproxy/v1/bin`,
 2. adds `.devproxy/` to `.gitignore` if missing,
 3. checks whether the platform-specific DevProxy binary already exists,
 4. downloads it from GitHub releases if missing,
 5. verifies `checksums.txt`,
 6. forwards all arguments to the real DevProxy binary.
 
-If you want a much smaller repo bootstrapper, copy one of these scripts instead of the Go binary:
+If your environment allows scripts, you can copy one of these much smaller repo bootstrappers instead of the Go binary:
 
 ```text
 scripts/bootstrap/devproxy.sh
 scripts/bootstrap/devproxy.ps1
 ```
 
-The scripts are tiny and download/run the real DevProxy binary the same way.
+The scripts are tiny and download/run the real DevProxy binary the same way. If your organization blocks `.ps1` or `.sh`, use the native `devproxy-bootstrap-*` executable from the release instead; it avoids PowerShell/shell script policy restrictions. On Windows, the `.exe` does not need `chmod`.
 
 Default release URL base for the current bootstrapper:
 
