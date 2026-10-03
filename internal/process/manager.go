@@ -100,7 +100,9 @@ func (m *Manager) Start(ctx context.Context, name string) error {
 	}
 	m.mu.Unlock()
 
-	processCtx, cancel := context.WithCancel(ctx)
+	// Process lifetime must not be tied to the HTTP request that started it.
+	// The manager owns cancellation through Stop and StopAll.
+	processCtx, cancel := context.WithCancel(context.Background())
 	cmd := shellCommand(processCtx, processConfig.Command)
 	cmd.Dir = processConfig.WorkingDir
 	cmd.Env = processEnv(processConfig.Env)
@@ -182,15 +184,17 @@ func (m *Manager) Restart(ctx context.Context, name string) error {
 	}
 
 	m.mu.Lock()
-	_, running := m.running[name]
+	running, exists := m.running[name]
 	m.mu.Unlock()
 
-	if running {
-		if err := m.Stop(ctx, name); err != nil {
+	if exists {
+		if err := m.stop(ctx, running); err != nil {
 			return err
 		}
 	}
 
+	// A process that exited naturally is already removed from running; restart
+	// should still start a fresh instance rather than requiring a manual reset.
 	return m.Start(ctx, name)
 }
 
@@ -237,16 +241,22 @@ func (m *Manager) stop(ctx context.Context, process *runningProcess) error {
 
 	now := time.Now()
 	m.mu.Lock()
-	status := m.statuses[name]
-	status.State = StateStopping
-	m.statuses[name] = status
+	owned := false
+	if current, ok := m.running[name]; ok && current == process {
+		owned = true
+		status := m.statuses[name]
+		status.State = StateStopping
+		m.statuses[name] = status
+	}
 	m.mu.Unlock()
 
-	m.publish(event.ProcessEvent{
-		Type:      "process.stopping",
-		Timestamp: now,
-		Process:   name,
-	})
+	if owned {
+		m.publish(event.ProcessEvent{
+			Type:      "process.stopping",
+			Timestamp: now,
+			Process:   name,
+		})
+	}
 
 	process.cancel()
 
@@ -282,7 +292,6 @@ func (m *Manager) captureOutput(name string, stream string, reader io.Reader) {
 			Message:   line,
 		})
 
-		log.Printf("[%s:%s] %s", name, stream, line)
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -315,25 +324,30 @@ func (m *Manager) wait(name string, process *runningProcess) {
 	}
 
 	m.mu.Lock()
-	currentStatus := m.statuses[name]
-	delete(m.running, name)
+	if current, ok := m.running[name]; ok && current == process {
+		// Only the waiter that still owns the entry may update the status. A
+		// late waiter from an older instance must not overwrite the status of
+		// a newer instance started after a restart.
+		delete(m.running, name)
 
-	wasStopping := currentStatus.State == StateStopping
-	currentStatus.PID = 0
-	currentStatus.State = StateExited
-	currentStatus.ExitedAt = &now
-	currentStatus.ExitCode = &exitCode
+		currentStatus := m.statuses[name]
+		wasStopping := currentStatus.State == StateStopping
+		currentStatus.PID = 0
+		currentStatus.State = StateExited
+		currentStatus.ExitedAt = &now
+		currentStatus.ExitCode = &exitCode
 
-	if err != nil {
-		processEvent.Error = err.Error()
-		currentStatus.LastError = err.Error()
+		if err != nil {
+			processEvent.Error = err.Error()
+			currentStatus.LastError = err.Error()
 
-		if !wasStopping {
-			currentStatus.State = StateFailed
+			if !wasStopping {
+				currentStatus.State = StateFailed
+			}
 		}
-	}
 
-	m.statuses[name] = currentStatus
+		m.statuses[name] = currentStatus
+	}
 	m.mu.Unlock()
 
 	m.publish(processEvent)

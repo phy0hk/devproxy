@@ -1,47 +1,103 @@
 <!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content</head>="width=device-width, initial-scale=1" />
-  <title>DevProxy</title>
-  <link rel="stylesheet" href="/static/app.css" />
-</head>
-<body>
-  <header>
-    <h1>DevProxy</h1>
-    <div id="status" class="connection-status">connecting…</div>
-  </header>
-
-  <main>
-    <section>
-      <h2>Processes</h2>
-      <div id="processes" class="process-grid">
-        <div class="muted">loading processes…</div>
-      </div>
-    </section>
-
-    <section>
-      <div class="section-header">
-        <div>
-          <h2>Events</h2>
-          <div class="muted">Select a process tab to see only that instance's logs and proxy requests.</div>
+<html lang="en" data-theme="dark">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>DevProxy</title>
+        <link
+            rel="stylesheet"
+            href="https://cdn.jsdelivr.net/npm/daisyui@4.12.14/dist/full.min.css"
+        />
+        <script src="https://cdn.tailwindcss.com"></script>
+        <link rel="stylesheet" href="/static/app.css" />
+    </head>
+    <body class="min-h-screen bg-base-200">
+        <div class="navbar bg-base-100 shadow-md">
+            <div class="navbar-start gap-2">
+                <span class="text-xl font-bold">DevProxy</span>
+                <span class="badge badge-ghost">control room</span>
+            </div>
+            <div class="navbar-end">
+                <span id="status" class="badge badge-outline">connecting…</span>
+            </div>
         </div>
-      </div>
 
-      <nav id="tabs" class="tabs" aria-label="Event filters"></nav>
+        <main class="mx-auto max-w-7xl space-y-4 p-4 lg:p-6">
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                <figure class="stat bg-base-100 shadow">
+                    <div class="stat-title">Managed processes</div>
+                    <div class="stat-value" id="process-count">—</div>
+                    <div class="stat-desc">configured instances</div>
+                </figure>
+                <figure class="stat bg-base-100 shadow">
+                    <div class="stat-title">Live now</div>
+                    <div class="stat-value text-success" id="running-count">
+                        —
+                    </div>
+                    <div class="stat-desc">currently running</div>
+                </figure>
+                <figure class="stat bg-base-100 shadow">
+                    <div class="stat-title">Event stream</div>
+                    <div class="stat-value">SSE</div>
+                    <div class="stat-desc">real-time updates</div>
+                </figure>
+            </div>
 
-      <section class="terminal-panel" aria-label="Event terminal">
-        <div class="terminal-header">
-          <span class="terminal-dot red"></span>
-          <span class="terminal-dot yellow"></span>
-          <span class="terminal-dot green"></span>
-          <span id="terminal-title" class="terminal-title">all events</span>
-        </div>
-        <div id="events" class="terminal-body"></div>
-      </section>
-    </section>
-  </main>
+            <div
+                class="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(280px,1fr)_2fr]"
+            >
+                <section class="rounded-box bg-base-100 shadow">
+                    <div
+                        class="flex items-center justify-between border-b border-base-300 p-4"
+                    >
+                        <div>
+                            <h2 class="font-semibold">Instances</h2>
+                            <p class="text-xs text-base-content/60">
+                                Lifecycle state and controls
+                            </p>
+                        </div>
+                        <button id="refresh" class="btn btn-ghost btn-sm">
+                            Refresh
+                        </button>
+                    </div>
+                    <div id="processes" class="space-y-2 p-3">
+                        <div class="text-sm text-base-content/50">
+                            Loading processes…
+                        </div>
+                    </div>
+                </section>
 
-  <script src="/static/app.js"></script>
-</body>
+                <section class="rounded-box bg-base-100 shadow">
+                    <div
+                        class="flex items-center justify-between border-b border-base-300 p-4"
+                    >
+                        <div>
+                            <h2 class="font-semibold" id="terminal-title">
+                                Instance output
+                            </h2>
+                            <p class="text-xs text-base-content/60">
+                                Process output is kept separate from proxy
+                                routing logs.
+                            </p>
+                        </div>
+                        <button id="clear" class="btn btn-ghost btn-sm">
+                            Clear
+                        </button>
+                    </div>
+                    <div
+                        id="tabs"
+                        class="tabs tabs-bordered px-4 pt-3"
+                        role="tablist"
+                    ></div>
+                    <pre
+                        id="events"
+                        class="terminal m-4 rounded-xl p-4 text-xs"
+                        aria-live="polite"
+                    ></pre>
+                </section>
+            </div>
+        </main>
+
+        <script src="/static/app.js"></script>
+    </body>
 </html>

@@ -78,6 +78,56 @@ func TestManagerStopUpdatesStatus(t *testing.T) {
 	}
 }
 
+func TestManagerStartOutlivesCallerContext(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses POSIX sleep command")
+	}
+
+	manager := NewManager([]config.ProcessConfig{{Name: "worker", Command: "sleep 1"}}, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := manager.Start(ctx, "worker"); err != nil {
+		t.Fatalf("start process: %v", err)
+	}
+	cancel()
+
+	time.Sleep(50 * time.Millisecond)
+	if status := manager.Statuses()[0]; status.State != StateRunning {
+		t.Fatalf("state after caller cancellation = %q, want %q", status.State, StateRunning)
+	}
+	if err := manager.StopAll(context.Background()); err != nil {
+		t.Fatalf("stop process: %v", err)
+	}
+}
+
+func TestManagerRestartAfterNaturalExit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses POSIX shell command")
+	}
+
+	manager := NewManager([]config.ProcessConfig{{Name: "worker", Command: "exit 0"}}, nil)
+	if err := manager.Start(context.Background(), "worker"); err != nil {
+		t.Fatalf("start process: %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if manager.Statuses()[0].State == StateExited {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if status := manager.Statuses()[0]; status.State != StateExited {
+		t.Fatalf("state after natural exit = %q, want %q", status.State, StateExited)
+	}
+	if err := manager.Restart(context.Background(), "worker"); err != nil {
+		t.Fatalf("restart after natural exit: %v", err)
+	}
+	defer manager.StopAll(context.Background())
+	if status := manager.Statuses()[0]; status.State != StateRunning {
+		t.Fatalf("state after restart = %q, want %q", status.State, StateRunning)
+	}
+}
+
 func TestManagerRestartStartsRunningProcessAgain(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("uses POSIX sleep command")
@@ -115,6 +165,39 @@ func TestManagerRestartStartsRunningProcessAgain(t *testing.T) {
 
 	if status.PID == firstPID {
 		t.Fatalf("pid = %d, want a new pid", status.PID)
+	}
+}
+
+func TestManagerRestartCycleKeepsStatusConsistent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses POSIX shell command")
+	}
+
+	manager := NewManager([]config.ProcessConfig{{Name: "worker", Command: "sleep 5"}}, nil)
+	if err := manager.Start(context.Background(), "worker"); err != nil {
+		t.Fatalf("start process: %v", err)
+	}
+	firstPID := manager.Statuses()[0].PID
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := manager.Restart(ctx, "worker"); err != nil {
+		t.Fatalf("restart process: %v", err)
+	}
+	defer manager.StopAll(context.Background())
+
+	status := manager.Statuses()[0]
+	if status.State != StateRunning {
+		t.Fatalf("state = %q, want %q", status.State, StateRunning)
+	}
+	if status.PID == 0 || status.PID == firstPID {
+		t.Fatalf("pid = %d, want a new pid different from %d", status.PID, firstPID)
+	}
+	if status.ExitedAt != nil {
+		t.Fatalf("exited_at = %v, want nil for a running process", status.ExitedAt)
+	}
+	if status.LastError != "" {
+		t.Fatalf("last_error = %q, want empty for a running process", status.LastError)
 	}
 }
 
