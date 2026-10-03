@@ -157,32 +157,32 @@ The `v1` channel release is what the current bootstrapper uses. This lets projec
 
 ```yaml
 server:
-  proxy:
-    host: 127.0.0.1
-    port: 8082
-  ui:
-    host: 127.0.0.1
-    port: 8081
+    proxy:
+        host: 127.0.0.1
+        port: 8082
+    ui:
+        host: 127.0.0.1
+        port: 8081
 
 processes:
-  - name: frontend
-    command: pnpm dev
-    working_dir: ./frontend
+    - name: frontend
+      command: pnpm dev
+      working_dir: ./frontend
 
-  - name: backend
-    command: pnpm start:dev
-    working_dir: ./backend
+    - name: backend
+      command: pnpm start:dev
+      working_dir: ./backend
 
 proxy:
-  targets:
-    - name: frontend
-      path: /
-      url: http://127.0.0.1:3000
+    targets:
+        - name: frontend
+          path: /
+          url: http://127.0.0.1:3000
 
-    - name: api
-      path: /api
-      url: http://127.0.0.1:4000
-      rewrite: true
+        - name: api
+          path: /api
+          url: http://127.0.0.1:4000
+          rewrite: true
 ```
 
 ## Project Details
@@ -208,3 +208,23 @@ This project currently has:
 - route matching, event bus, config, process, and UI API tests.
 
 The next recommended step is to add health checks for managed processes, then build the real TUI.
+
+## How to Build
+
+### Linux
+
+```bash
+GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o devproxy-bootstrap-linux-amd64 ./cmd/devproxy-bootstrap
+```
+
+### Mac OS
+
+```bash
+GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o devproxy-bootstrap-mac-amd64  ./cmd/devproxy-bootstrap
+```
+
+### Window
+
+```bash
+GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o devproxy-bootstrap-windows-amd64.exe ./cmd/devproxy-bootstrap
+```
