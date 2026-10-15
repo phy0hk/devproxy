@@ -16,11 +16,11 @@ function escapeHTML(value) {
         /[&<>"']/g,
         (c) =>
             ({
-                "&": "&amp;",
-                "<": "&lt;",
-                ">": "&gt;",
-                '"': "&quot;",
-                "'": "&#39;",
+                "&": "&",
+                "<": "<",
+                ">": ">",
+                '"': """,
+                "'": "'",
             })[c],
     );
 }
@@ -34,7 +34,7 @@ function setStatus(kind) {
     const badge = $("status");
     const labels = {
         connected: "connected",
-        disconnected: "disconnected, retrying…",
+        disconnected: "disconnected, retrying...",
     };
     const classes = {
         connected: "badge badge-success",
@@ -117,44 +117,6 @@ function renderProcesses() {
       </article>`;
         })
         .join("");
-
-    container.querySelectorAll(".card").forEach((card) => {
-        card.addEventListener("click", () => {
-            state.selected = card.dataset.name;
-            state.view = "stdout";
-            renderProcesses();
-            renderOutput();
-        });
-        card.querySelectorAll("[data-action]").forEach((button) => {
-            button.addEventListener("click", async (event) => {
-                event.stopPropagation();
-                button.disabled = true;
-                try {
-                    const response = await fetch(
-                        `/api/processes/${encodeURIComponent(card.dataset.name)}/${button.dataset.action}`,
-                        { method: "POST" },
-                    );
-                    if (!response.ok) {
-                        const detail = (await response.text()).trim();
-                        pushLifecycle(
-                            card.dataset.name,
-                            `process.${button.dataset.action}.error`,
-                            detail,
-                        );
-                    }
-                } catch (error) {
-                    pushLifecycle(
-                        card.dataset.name,
-                        `process.${button.dataset.action}.error`,
-                        error.message,
-                    );
-                } finally {
-                    button.disabled = false;
-                    await loadProcesses();
-                }
-            });
-        });
-    });
 }
 
 function pushLifecycle(name, type, message) {
@@ -181,14 +143,6 @@ function renderTabs() {
                 `<button role="tab" class="tab ${state.view === tab.id ? "tab-active" : ""}" data-view="${tab.id}">${tab.label}</button>`,
         )
         .join("");
-    $("tabs")
-        .querySelectorAll("[data-view]")
-        .forEach((tab) => {
-            tab.addEventListener("click", () => {
-                state.view = tab.dataset.view;
-                renderOutput();
-            });
-        });
 }
 
 function visibleLines() {
@@ -221,13 +175,13 @@ function lineHTML(line) {
                 : line.status >= 400
                   ? "text-warning"
                   : "text-success";
-        const summary = `${line.method} ${line.path} → ${line.upstream} <span class="${statusClass}">${line.status}</span> ${line.duration_ms}ms`;
+        const summary = `${line.method} ${line.path} \u2192 ${line.upstream} <span class="${statusClass}">${line.status}</span> ${line.duration_ms}ms`;
         return `<div class="terminal-line proxy">${time}${summary}</div>`;
     }
 
     if (state.view === "lifecycle") {
         const detail = line.error || line.message || "";
-        return `<div class="terminal-line lifecycle">${time}${escapeHTML(line.type)}${detail ? ` — ${escapeHTML(detail)}` : ""}</div>`;
+        return `<div class="terminal-line lifecycle">${time}${escapeHTML(line.type)}${detail ? ` \u2014 ${escapeHTML(detail)}` : ""}</div>`;
     }
 
     return `<div class="terminal-line ${line.stream}">${time}${escapeHTML(line.message)}</div>`;
@@ -238,7 +192,7 @@ function renderOutput() {
     const selected =
         state.processes.find((p) => p.name === state.selected) ?? null;
     $("terminal-title").textContent = selected
-        ? `${selected.name} · ${state.view}`
+        ? `${selected.name} \u00b7 ${state.view}`
         : "Instance output";
 
     const lines = visibleLines();
@@ -249,12 +203,46 @@ function renderOutput() {
     terminal.scrollTop = terminal.scrollHeight;
 }
 
-function connectEvents() {
-    const source = new EventSource("/events");
-    source.onopen = () => setStatus("connected");
-    source.onerror = () => setStatus("disconnected");
+// Map view to event types for server-side filtering
+function eventTypesForView(view) {
+    switch (view) {
+        case "stdout":
+            return ["process.output"];
+        case "stderr":
+            return ["process.output"]; // We filter stream client-side
+        case "lifecycle":
+            return [
+                "process.started",
+                "process.stopping",
+                "process.exited",
+                "process.failed",
+                "process.output_error",
+            ];
+        case "proxy":
+            return ["proxy.request", "proxy.error"];
+        default:
+            return [];
+    }
+}
 
-    source.addEventListener("devproxy", (event) => {
+let eventSource = null;
+
+function connectEvents() {
+    // Close existing connection if any
+    if (eventSource) {
+        eventSource.close();
+    }
+
+    const types = eventTypesForView(state.view);
+    const url = types.length > 0
+        ? `/events?types=${encodeURIComponent(types.join(","))}`
+        : "/events";
+
+    eventSource = new EventSource(url);
+    eventSource.onopen = () => setStatus("connected");
+    eventSource.onerror = () => setStatus("disconnected");
+
+    eventSource.addEventListener("devproxy", (event) => {
         let item;
         try {
             item = JSON.parse(event.data);
@@ -290,6 +278,85 @@ function connectEvents() {
     });
 }
 
+function reconnectEvents() {
+    connectEvents();
+}
+
+// Event delegation for process cards and action buttons
+function setupProcessDelegation() {
+    const container = $("processes");
+    if (!container) return;
+
+    // Use a single click handler on the container for all process cards
+    container.addEventListener("click", (event) => {
+        // Handle card selection (click on card but not on buttons)
+        const card = event.target.closest(".card");
+        if (card && !event.target.closest("[data-action]")) {
+            state.selected = card.dataset.name;
+            state.view = "stdout";
+            renderProcesses();
+            renderOutput();
+            reconnectEvents();
+            return;
+        }
+
+        // Handle action buttons (start, restart, stop)
+        const button = event.target.closest("[data-action]");
+        if (button) {
+            event.stopPropagation();
+            const card = button.closest(".card");
+            if (!card) return;
+
+            button.disabled = true;
+            const action = button.dataset.action;
+            const name = card.dataset.name;
+
+            fetch(`/api/processes/${encodeURIComponent(name)}/${action}`, {
+                method: "POST",
+            })
+                .then((response) => {
+                    if (!response.ok) {
+                        return response.text().then((detail) => {
+                            throw new Error(detail);
+                        });
+                    }
+                })
+                .catch((error) => {
+                    pushLifecycle(
+                        name,
+                        `process.${action}.error`,
+                        error.message,
+                    );
+                })
+                .finally(() => {
+                    button.disabled = false;
+                    loadProcesses();
+                });
+        }
+    });
+}
+
+// Event delegation for tabs
+function setupTabDelegation() {
+    const tabsContainer = $("tabs");
+    if (!tabsContainer) return;
+
+    tabsContainer.addEventListener("click", (event) => {
+        const tab = event.target.closest("[data-view]");
+        if (tab) {
+            state.view = tab.dataset.view;
+            renderOutput();
+            reconnectEvents();
+        }
+    });
+}
+
+// Initialize event delegation once at startup
+function initDelegation() {
+    setupProcessDelegation();
+    setupTabDelegation();
+}
+
 $("refresh").addEventListener("click", loadProcesses);
 $("clear").addEventListener("click", () => {
     if (state.view === "proxy") {
@@ -308,4 +375,5 @@ $("clear").addEventListener("click", () => {
 
 loadProcesses();
 connectEvents();
+initDelegation();
 setInterval(loadProcesses, 5000);

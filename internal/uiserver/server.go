@@ -14,6 +14,11 @@ import (
 	"github.com/phy0hk/devproxy/internal/proxy"
 )
 
+// NewEventBus creates a new event bus for sharing between TUI and web UI
+func NewEventBus() *event.Bus {
+	return event.NewBus()
+}
+
 type Server struct {
 	config         *config.Config
 	proxyHTTP      *http.Server
@@ -41,17 +46,29 @@ func New(cfg *config.Config) (*Server, error) {
 
 	processManager := process.NewManager(cfg.Processes, bus)
 
-	uiMux := http.NewServeMux()
-	uiMux.Handle("/static/", handleStaticAssets())
-	uiMux.HandleFunc("/", handleDashboard)
-	uiMux.HandleFunc("/api/processes", handleProcessStatuses(processManager))
-	uiMux.HandleFunc("/api/processes/", handleProcessAction(processManager))
-	uiMux.HandleFunc(
-		"/events",
-		func(w http.ResponseWriter, r *http.Request) {
-			handleEvents(w, r, bus)
-		},
-	)
+	var uiHTTP *http.Server
+	if cfg.Server.UI.Enabled {
+		uiMux := http.NewServeMux()
+		uiMux.Handle("/static/", handleStaticAssets())
+		uiMux.HandleFunc("/", handleDashboard)
+		uiMux.HandleFunc("/api/processes", handleProcessStatuses(processManager))
+		uiMux.HandleFunc("/api/processes/", handleProcessAction(processManager))
+		uiMux.HandleFunc(
+			"/events",
+			func(w http.ResponseWriter, r *http.Request) {
+				handleEvents(w, r, bus)
+			},
+		)
+
+		uiHTTP = &http.Server{
+			Addr: fmt.Sprintf(
+				"%s:%d",
+				cfg.Server.UI.Host,
+				cfg.Server.UI.Port,
+			),
+			Handler: uiMux,
+		}
+	}
 
 	return &Server{
 		config:         cfg,
@@ -65,14 +82,7 @@ func New(cfg *config.Config) (*Server, error) {
 			),
 			Handler: proxyMux,
 		},
-		uiHTTP: &http.Server{
-			Addr: fmt.Sprintf(
-				"%s:%d",
-				cfg.Server.UI.Host,
-				cfg.Server.UI.Port,
-			),
-			Handler: uiMux,
-		},
+		uiHTTP: uiHTTP,
 	}, nil
 }
 
@@ -83,13 +93,15 @@ func (s *Server) Start() error {
 
 	errCh := make(chan error, 2)
 
-	go func() {
-		log.Printf(
-			"ui server listening on http://%s",
-			s.uiHTTP.Addr,
-		)
-		errCh <- s.uiHTTP.ListenAndServe()
-	}()
+	if s.uiHTTP != nil {
+		go func() {
+			log.Printf(
+				"ui server listening on http://%s",
+				s.uiHTTP.Addr,
+			)
+			errCh <- s.uiHTTP.ListenAndServe()
+		}()
+	}
 
 	go func() {
 		log.Printf(
@@ -113,7 +125,10 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 	processErr := s.processManager.StopAll(shutdownCtx)
 	proxyErr := s.proxyHTTP.Shutdown(shutdownCtx)
-	uiErr := s.uiHTTP.Shutdown(shutdownCtx)
+	var uiErr error
+	if s.uiHTTP != nil {
+		uiErr = s.uiHTTP.Shutdown(shutdownCtx)
+	}
 
 	if processErr != nil {
 		return processErr

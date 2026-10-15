@@ -39,7 +39,7 @@ The repository is currently a Go application with these relevant areas:
 ### Current stack
 
 - **Language:** Go.
-- **Module:** `github.com/phyozawtun/devproxy`.
+- **Module:** `github.com/phy0hk/devproxy`.
 - **Application shape:** Go command-line/server application with internal packages for proxying, process management, logging, events, and UI serving.
 - **Configuration:** Existing repository configuration files and the `internal/config` package.
 - **Web dashboard:** Existing or planned web UI served through the Go application; implementation details must be confirmed from the current code before extending it.

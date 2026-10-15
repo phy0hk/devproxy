@@ -1,18 +1,22 @@
+processes:
+    - name: test
+      command: echo "Hello World"
+      working_dir: .
 server:
     proxy:
         host: "127.0.0.1"
         port: 8082
 
     ui:
+        enabled: true
         host: "127.0.0.1"
-        port: 8081
+        port: 8083
+
+    tui:
+        enabled: false
 
 proxy:
     targets:
-        - name: api
-          path: /api
+        - name: test
+          path: /
           url: https://api.example.com
-
-        - name: users
-          path: /api/users
-          url: https://users.example.com

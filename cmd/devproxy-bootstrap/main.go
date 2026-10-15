@@ -14,8 +14,6 @@ import (
 	"runtime"
 	"strings"
 	"time"
-
-	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -119,27 +117,6 @@ func extractFlags(args []string) (version string, configPath string, rest []stri
 // versionFromConfig reads an optional top-level "version" key from the same
 // config.yaml the main app uses. A missing or unreadable file falls back to
 // the default version.
-func versionFromConfig(path string) string {
-	if path == "" {
-		path = "config.yaml"
-	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return ""
-	}
-
-	var cfg struct {
-		Version string `yaml:"version"`
-	}
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not read version from %s: %v\n", path, err)
-		return ""
-	}
-
-	return strings.TrimSpace(cfg.Version)
-}
-
 func validVersion(version string) bool {
 	if version == "" || len(version) > 64 {
 		return false
@@ -485,4 +462,29 @@ func execDevProxy(binaryPath string, args []string) error {
 	cmd.Env = os.Environ()
 
 	return cmd.Run()
+}
+
+// versionFromConfig reads an optional top-level version key from config.yaml.
+// It intentionally uses a small parser so the bootstrapper has no YAML dependency.
+func versionFromConfig(path string) string {
+	if path == "" {
+		path = "config.yaml"
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "version:") {
+			value := strings.TrimSpace(strings.TrimPrefix(trimmed, "version:"))
+			return strings.TrimSpace(strings.Trim(value, "\"'"))
+		}
+	}
+	return ""
 }

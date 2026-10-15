@@ -148,7 +148,7 @@ func (m *Manager) Start(ctx context.Context, name string) error {
 	m.mu.Unlock()
 
 	m.publish(event.ProcessEvent{
-		Type:      "process.started",
+		EventType: event.TypeProcessStarted,
 		Timestamp: now,
 		Process:   name,
 		Message:   processConfig.Command,
@@ -252,7 +252,7 @@ func (m *Manager) stop(ctx context.Context, process *runningProcess) error {
 
 	if owned {
 		m.publish(event.ProcessEvent{
-			Type:      "process.stopping",
+			EventType: event.TypeProcessStopping,
 			Timestamp: now,
 			Process:   name,
 		})
@@ -285,7 +285,7 @@ func (m *Manager) captureOutput(name string, stream string, reader io.Reader) {
 		line := scanner.Text()
 
 		m.publish(event.ProcessEvent{
-			Type:      "process.output",
+			EventType: event.TypeProcessOutput,
 			Timestamp: time.Now(),
 			Process:   name,
 			Stream:    stream,
@@ -296,7 +296,7 @@ func (m *Manager) captureOutput(name string, stream string, reader io.Reader) {
 
 	if err := scanner.Err(); err != nil {
 		m.publish(event.ProcessEvent{
-			Type:      "process.output_error",
+			EventType: event.TypeProcessOutputErr,
 			Timestamp: time.Now(),
 			Process:   name,
 			Stream:    stream,
@@ -317,7 +317,7 @@ func (m *Manager) wait(name string, process *runningProcess) {
 
 	now := time.Now()
 	processEvent := event.ProcessEvent{
-		Type:      "process.exited",
+		EventType: event.TypeProcessExited,
 		Timestamp: now,
 		Process:   name,
 		ExitCode:  exitCode,
@@ -376,7 +376,7 @@ func (m *Manager) markFailed(name string, err error) {
 	m.mu.Unlock()
 
 	m.publish(event.ProcessEvent{
-		Type:      "process.failed",
+		EventType: event.TypeProcessFailed,
 		Timestamp: now,
 		Process:   name,
 		Error:     err.Error(),

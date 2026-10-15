@@ -17,6 +17,7 @@ import (
 
 	"github.com/phy0hk/devproxy/internal/config"
 	"github.com/phy0hk/devproxy/internal/process"
+	"github.com/phy0hk/devproxy/internal/tui"
 	server "github.com/phy0hk/devproxy/internal/uiserver"
 )
 
@@ -63,18 +64,24 @@ func runUp(args []string) error {
 		"config.yaml",
 		"path to configuration file",
 	)
-	tui := flags.Bool(
+	tuiFlag := flags.Bool(
 		"tui",
 		false,
-		"enable terminal user interface",
+		"enable terminal user interface (overrides config)",
+	)
+	noTUI := flags.Bool(
+		"no-tui",
+		false,
+		"disable terminal user interface (overrides config)",
+	)
+	noUI := flags.Bool(
+		"no-ui",
+		false,
+		"disable web UI (overrides config)",
 	)
 
 	if err := flags.Parse(args); err != nil {
 		return err
-	}
-
-	if *tui {
-		log.Println("tui mode is not implemented yet; streaming logs to the terminal")
 	}
 
 	cfg, err := config.Load(*configPath)
@@ -82,16 +89,51 @@ func runUp(args []string) error {
 		return err
 	}
 
-	srv, err := server.New(cfg)
-	if err != nil {
-		return err
+	// Override config with command line flags
+	if *tuiFlag {
+		cfg.Server.TUI.Enabled = true
+	}
+	if *noTUI {
+		cfg.Server.TUI.Enabled = false
+	}
+	if *noUI {
+		cfg.Server.UI.Enabled = false
+	}
+
+	// If neither UI nor TUI is enabled, enable UI by default
+	if !cfg.Server.UI.Enabled && !cfg.Server.TUI.Enabled {
+		cfg.Server.UI.Enabled = true
+	}
+
+	bus := server.NewEventBus()
+	processManager := process.NewManager(cfg.Processes, bus)
+
+	var srv *server.Server
+	var tuiErrCh chan error
+
+	// Start TUI if enabled
+	if cfg.Server.TUI.Enabled {
+		tuiErrCh = make(chan error, 1)
+		go func() {
+			tuiErrCh <- tui.Run(cfg, processManager, bus)
+		}()
+	}
+
+	// Start web UI and proxy if enabled
+	if cfg.Server.UI.Enabled {
+		srv, err = server.New(cfg)
+		if err != nil {
+			return err
+		}
 	}
 
 	serverErr := make(chan error, 1)
 
-	go func() {
-		serverErr <- srv.Start()
-	}()
+	if srv != nil {
+		go func() {
+			serverErr <- srv.Start()
+		}()
+	}
 
 	signalCtx, stop := signal.NotifyContext(
 		context.Background(),
@@ -105,16 +147,23 @@ func runUp(args []string) error {
 		if isNormalServerClose(err) {
 			return nil
 		}
-
 		return err
 
-	case <-signalCtx.Done():
-		if err := srv.Shutdown(context.Background()); err != nil {
-			return fmt.Errorf("shutdown: %w", err)
+	case err := <-tuiErrCh:
+		if err != nil {
+			return err
 		}
 
+	case <-signalCtx.Done():
+		if srv != nil {
+			if err := srv.Shutdown(context.Background()); err != nil {
+				return fmt.Errorf("shutdown: %w", err)
+			}
+		}
 		return nil
 	}
+
+	return nil
 }
 
 func runProcess(args []string) error {
@@ -294,7 +343,7 @@ func printUsage() {
 	fmt.Fprintf(os.Stderr, `DevProxy - reverse proxy and process runner for local development
 
 Usage:
-  devproxy [up] [--config config.yaml] [--tui]
+  devproxy [up] [--config config.yaml] [--tui] [--no-tui] [--no-ui]
   devproxy process [list] [--config config.yaml] [--ui-url url]
   devproxy process start <name> [--config config.yaml] [--ui-url url]
   devproxy process stop <name> [--config config.yaml] [--ui-url url]
@@ -313,7 +362,18 @@ Commands:
 Flags:
   --config  Path to config file. Default: config.yaml
   --ui-url  UI/API base URL for process commands. Defaults to server.ui from config.
-  --tui     Reserved for terminal UI mode. Logs stream to terminal for now.
+  --tui     Enable terminal user interface (overrides config).
+  --no-tui  Disable terminal user interface (overrides config).
+  --no-ui   Disable web UI (overrides config).
+
+Configuration (config.yaml):
+  server:
+    ui:
+      enabled: true    # Enable web UI
+      host: "127.0.0.1"
+      port: 8081
+    tui:
+      enabled: false   # Enable terminal UI
 
 `)
 }

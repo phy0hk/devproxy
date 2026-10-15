@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/phy0hk/devproxy/internal/event"
 )
@@ -36,7 +37,19 @@ func handleEvents(
 		"keep-alive",
 	)
 
-	subscriber := bus.Subscribe()
+	// Parse optional event type filter from query parameters
+	// e.g., /events?types=process.output,proxy.request
+	var filter []event.EventType
+	if typesParam := r.URL.Query().Get("types"); typesParam != "" {
+		for _, t := range strings.Split(typesParam, ",") {
+			t = strings.TrimSpace(t)
+			if t != "" {
+				filter = append(filter, event.EventType(t))
+			}
+		}
+	}
+
+	subscriber := bus.SubscribeFiltered(filter)
 	defer bus.Unsubscribe(subscriber)
 
 	fmt.Fprint(w, ": connected\n\n")

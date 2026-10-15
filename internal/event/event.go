@@ -2,8 +2,9 @@ package event
 
 import "time"
 
+// ProcessEvent represents a process lifecycle or output event.
 type ProcessEvent struct {
-	Type      string    `json:"type"`
+	EventType EventType `json:"type"`
 	Timestamp time.Time `json:"timestamp"`
 	Process   string    `json:"process"`
 	Stream    string    `json:"stream,omitempty"`
@@ -12,8 +13,14 @@ type ProcessEvent struct {
 	Error     string    `json:"error,omitempty"`
 }
 
+// Type returns the event type for filtering.
+func (e ProcessEvent) Type() EventType {
+	return e.EventType
+}
+
+// RequestEvent represents a proxy request event.
 type RequestEvent struct {
-	Type         string    `json:"type"`
+	EventType    EventType `json:"type"`
 	ID           string    `json:"id"`
 	Timestamp    time.Time `json:"timestamp"`
 	Method       string    `json:"method"`
@@ -24,4 +31,9 @@ type RequestEvent struct {
 	DurationMS   int64     `json:"duration_ms"`
 	RequestSize  int64     `json:"request_size"`
 	ResponseSize int64     `json:"response_size"`
+}
+
+// Type returns the event type for filtering.
+func (e RequestEvent) Type() EventType {
+	return e.EventType
 }

@@ -45,12 +45,12 @@ jobs:
             prerelease="false"
           elif [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
             tag=""
-            channel="v1"
+            channel="v1_2"
             publish="false"
             prerelease="false"
           else
-            tag="v1"
-            channel="v1"
+            tag="v1_2"
+            channel="v1_2"
             publish="true"
             prerelease="true"
           fi

@@ -17,12 +17,22 @@ type Config struct {
 
 type ServerConfig struct {
 	Proxy ServerAddress `yaml:"proxy"`
-	UI    ServerAddress `yaml:"ui"`
+	UI    UIConfig      `yaml:"ui"`
+	TUI   TUIConfig     `yaml:"tui"`
 }
 
 type ServerAddress struct {
 	Host string `yaml:"host"`
 	Port int    `yaml:"port"`
+}
+
+type UIConfig struct {
+	Enabled       bool `yaml:"enabled"`
+	ServerAddress `yaml:",inline"`
+}
+
+type TUIConfig struct {
+	Enabled bool `yaml:"enabled"`
 }
 
 type ProcessConfig struct {
@@ -86,6 +96,13 @@ func (c *Config) setDefaults() {
 	if c.Server.UI.Port == 0 {
 		c.Server.UI.Port = 8081
 	}
+
+	// Set defaults for UI config if not already set
+	if !c.Server.UI.Enabled && c.Server.UI.Host == "" && c.Server.UI.Port == 0 {
+		c.Server.UI.Enabled = true
+		c.Server.UI.Host = "127.0.0.1"
+		c.Server.UI.Port = 8081
+	}
 }
 
 func (c *Config) Validate() error {
@@ -93,8 +110,10 @@ func (c *Config) Validate() error {
 		return err
 	}
 
-	if err := validateServerAddress("server.ui", c.Server.UI); err != nil {
-		return err
+	if c.Server.UI.Enabled {
+		if err := validateServerAddress("server.ui", c.Server.UI.ServerAddress); err != nil {
+			return err
+		}
 	}
 
 	processNames := make(map[string]struct{}, len(c.Processes))

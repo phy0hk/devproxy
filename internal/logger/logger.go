@@ -62,8 +62,8 @@ func (l *Logger) Middleware(next http.Handler) http.Handler {
 		}
 
 		entry := event.RequestEvent{
-			Type:         "proxy.request",
-			ID:           "",
+			EventType:    event.TypeProxyRequest,
+			ID:           event.NextID(),
 			Timestamp:    start,
 			Method:       r.Method,
 			Path:         r.URL.RequestURI(),
