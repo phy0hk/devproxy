@@ -26,6 +26,9 @@ type KeyMap struct {
 	PageDown   key.Binding
 	Home       key.Binding
 	End        key.Binding
+	PrevRun    key.Binding
+	NextRun    key.Binding
+	Filter     key.Binding
 }
 
 var DefaultKeyMap = KeyMap{
@@ -110,17 +113,28 @@ var DefaultKeyMap = KeyMap{
 		key.WithHelp("home", "go to top"),
 	),
 	End: key.NewBinding(
-		key.WithKeys("end"),
-		key.WithHelp("end", "go to bottom"),
+		key.WithKeys("end", "G"),
+		key.WithHelp("end/G", "follow live"),
+	),
+	PrevRun: key.NewBinding(
+		key.WithKeys("["),
+		key.WithHelp("[", "older run"),
+	),
+	NextRun: key.NewBinding(
+		key.WithKeys("]"),
+		key.WithHelp("]", "newer run"),
+	),
+	Filter: key.NewBinding(
+		key.WithKeys("/"),
+		key.WithHelp("/", "filter"),
 	),
 }
 
 // ShortHelp returns keybindings to be shown in the mini help view
 func (k KeyMap) ShortHelp() []key.Binding {
 	return []key.Binding{
-		k.Up, k.Down, k.Left, k.Right,
-		k.Start, k.Stop, k.Restart,
-		k.SwitchView, k.Clear, k.Refresh,
+		k.Up, k.Down, k.Start, k.Stop, k.Restart,
+		k.SwitchView, k.PrevRun, k.NextRun, k.Filter,
 		k.Quit, k.Help,
 	}
 }
@@ -130,7 +144,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Left, k.Right, k.Enter},
 		{k.Start, k.Stop, k.Restart, k.Refresh, k.Clear},
-		{k.SwitchView, k.Tab, k.ShiftTab},
+		{k.SwitchView, k.Tab, k.ShiftTab, k.PrevRun, k.NextRun, k.Filter},
 		{k.ScrollUp, k.ScrollDown, k.PageUp, k.PageDown, k.Home, k.End},
 		{k.Quit, k.Help},
 	}

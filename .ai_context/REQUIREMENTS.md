@@ -1,8 +1,8 @@
 # DevProxy Requirements
 
-**Version:** v1.1  
-**Status:** Active  
-**Last updated:** 2026-10-03
+**Version:** v1.2
+**Status:** Active
+**Last updated:** 2026-11-17
 
 ## 1. Project Objectives
 
@@ -31,6 +31,8 @@ The repository is currently a Go application with these relevant areas:
 - `internal/proxy/` — proxy behavior.
 - `internal/proxyserver/` — proxy server concerns.
 - `internal/uiserver/` — UI server concerns.
+- `internal/logstore/` — bounded, run-aware in-memory process log history.
+- `internal/tui/` — Bubble Tea terminal UI.
 - `web/` — web-facing assets or dashboard implementation area.
 - `docs/PROJECT_DETAILS.md` — project-specific documentation.
 
@@ -41,19 +43,24 @@ The repository is currently a Go application with these relevant areas:
 - **Language:** Go.
 - **Module:** `github.com/phy0hk/devproxy`.
 - **Application shape:** Go command-line/server application with internal packages for proxying, process management, logging, events, and UI serving.
-- **Configuration:** Existing repository configuration files and the `internal/config` package.
-- **Web dashboard:** Existing or planned web UI served through the Go application; implementation details must be confirmed from the current code before extending it.
+- **Configuration:** YAML `config.yaml` loaded and validated by the `internal/config` package.
+- **Web dashboard:** Embedded browser UI served by the Go application, sharing the process manager and event bus with the TUI.
 
-### Planned capability
+### Current capability
 
 - A browser-based dashboard for instance and proxy management.
-- A future TUI sharing core application services with the dashboard rather than duplicating business logic.
+- A TUI that shares core application services with the dashboard rather than duplicating business logic.
 
-### Frontend technology (resolved 2026-10-03)
+### Frontend technology (v1.2)
 
-- The embedded dashboard uses **Tailwind CSS + daisyUI** loaded from CDN in `internal/uiserver/static/index.html` (no build step; assets remain Go-embedded).
-- Dashboard requires internet access for the CDN assets; a build step (e.g. Vite + daisyUI 5) may replace the CDN approach if offline use becomes a requirement.
-- Instance consoles must keep process stdout/stderr separate from proxy routing telemetry.
+- The embedded dashboard uses **vendored Tailwind CSS + daisyUI 5** in `internal/uiserver/static/vendor.css`. The CSS is generated with Bun and committed; there is no runtime CDN or build step, so the dashboard works offline.
+- Dashboard state is virtualized: the SSE stream is coalesced into 100 ms batches and the log view renders only the visible row window plus overscan.
+- Instance consoles keep process stdout/stderr separate from proxy routing telemetry, parse ANSI SGR/OSC sequences, and show run/clear separators.
+
+### TUI technology (v1.2)
+
+- Bubble Tea v1 + Lipgloss + Bubbles, using the dependencies already present in `go.mod`.
+- The TUI shares the same event bus and process manager as the dashboard and keeps all state in memory.
 
 ## 4. Core Architecture
 
@@ -61,13 +68,14 @@ The architecture should preserve a separation between transport/UI concerns and 
 
 1. **Configuration layer** — loads and validates proxy and instance definitions.
 2. **Process management layer** — starts, stops, tracks, and captures output from managed development processes.
-3. **Proxy layer** — maps incoming requests to configured local service targets.
-4. **Event layer** — communicates lifecycle and runtime state changes across components.
-5. **Logging layer** — records application and managed-process output in a consistent way.
-6. **HTTP/UI server layer** — exposes the dashboard and management endpoints.
-7. **Future TUI layer** — consumes the same process, proxy, configuration, event, and logging services through terminal-oriented views.
+3. **Log store layer** — keeps bounded per-process stdout/stderr history, run metadata, and monotonic sequences in memory.
+4. **Proxy layer** — maps incoming requests to configured local service targets.
+5. **Event layer** — communicates lifecycle and runtime state changes across components with resumable stream sequences.
+6. **Logging layer** — records application and managed-process output in a consistent way.
+7. **HTTP/UI server layer** — exposes the dashboard and management endpoints (`/api/processes`, `/api/processes/{name}/logs`, `/api/routes`, `/events`).
+8. **TUI layer** — consumes the same process, proxy, configuration, event, and logging services through terminal-oriented views.
 
-The initial implementation should favor a small, understandable design with explicit interfaces around process lifecycle, proxy routing, and instance state. Persistent storage should not be introduced until the current configuration and lifecycle requirements establish a need for it.
+The initial implementation should favor a small, understandable design with explicit interfaces around process lifecycle, proxy routing, and instance state. All history is in memory: a host restart ends the session, and there is no persistence. Persistent storage should not be introduced until the current configuration and lifecycle requirements establish a need for it.
 
 ## 5. Functional Requirements
 
@@ -77,11 +85,11 @@ The application must support defining development service instances with enough 
 
 ### FR-2: Process lifecycle
 
-Users must be able to start and stop a configured instance. The application must track whether an instance is stopped, starting, running, stopping, or failed, and must handle process termination without leaving stale state.
+Users must be able to start and stop a configured instance. The application must track whether an instance is stopped, starting, running, stopping, or failed, and must handle process termination without leaving stale state. Stopping an instance — including on `q`/Ctrl+C shutdown or a startup error — must terminate its whole process tree, not just the shell wrapper, so no descendant dev server is orphaned.
 
 ### FR-3: Runtime output
 
-Users must be able to view standard output and standard error from managed frontend and backend processes. Output should be associated with the correct instance and remain useful for diagnosing local development failures.
+Users must be able to view standard output and standard error from managed frontend and backend processes. Output must be associated with the correct instance and remain useful for diagnosing local development failures. The server keeps bounded in-memory history per process (default 5,000 lines, current plus previous run), exposes it through `GET /api/processes/{name}/logs`, and the dashboard restores it after a reload or reconnect. ANSI styling is rendered, and screen-clear sequences become visible separators instead of erasing the retained history.
 
 ### FR-4: Proxy routing
 
@@ -89,7 +97,7 @@ Users must be able to route requests received by DevProxy to one or more configu
 
 ### FR-5: Dashboard
 
-The web dashboard must provide a simple view for inspecting configured instances, current lifecycle state, proxy configuration, and recent or live logs. It must expose the core management operations without requiring users to write Nginx configuration.
+The web dashboard must provide a simple view for inspecting configured instances, current lifecycle state, proxy configuration, and recent or live logs. It must expose the core management operations without requiring users to write Nginx configuration. It supports light/dark/system themes, run selection, visible-text filtering and copy, keyboard-accessible tabs, and a responsive layout down to mobile widths.
 
 ### FR-6: Configuration
 
@@ -101,7 +109,11 @@ The application must log meaningful application events and surface actionable er
 
 ### FR-8: TUI readiness
 
-Core business logic must remain usable without the web dashboard so a future TUI can call the same instance, process, proxy, event, and logging services.
+Core business logic must remain usable without the web dashboard so the TUI can call the same instance, process, proxy, event, and logging services. The TUI is enabled with `--tui` or `server.tui.enabled`, enforces a minimum terminal size, supports resize, run switching, filtering, and start/stop/restart without blocking the update loop, and shares one process manager and event bus with the dashboard.
+
+### FR-10: Stream resumability
+
+The event stream must batch live events (about 10 flushes per second), carry the sequence of the last delivered event as the SSE `id`, accept `Last-Event-ID` on reconnect, and replay retained history without duplicates from that point. The dashboard must not render raw ANSI escape bytes or claim conflict-free collaboration semantics.
 
 ### FR-9: Safety and scope
 
@@ -114,6 +126,7 @@ DevProxy is intended for local development and testing. It must not be described
 - Avoid coupling core process and proxy logic to a specific UI.
 - Keep changes compatible with the existing Go module and package organization.
 - Add tests around lifecycle, routing, configuration validation, and error paths as implementation progresses.
+- Keep dashboard work bounded under sustained output: coalesce SSE, virtualize rows, and cap client/server buffers.
 
 ## 7. Open Decisions
 
@@ -121,10 +134,11 @@ The following decisions require confirmation from the current code and product d
 
 - Exact configuration schema for instances and routes.
 - Whether configuration is file-only or also persisted through the dashboard.
-- Log retention and streaming strategy (client-side buffers only; no server-side history endpoint yet).
+- Whether log buffer capacity and run retention should be exposed in `config.yaml` (v1.2 uses programmatic defaults only; changing the schema requires approval).
 - Port allocation and collision behavior.
 - Authentication or access restrictions, if DevProxy may bind beyond localhost.
-- TUI framework and command structure.
+- **Resolved 2026-11-16 — TUI framework:** Bubble Tea v1 + Lipgloss + Bubbles (already present in `go.mod`, so no new dependency). The TUI consumes the same process manager and event bus as the dashboard; it does not own business logic.
+- **Resolved 2026-11-17 — Dashboard assets:** Tailwind + daisyUI 5 are vendored and Go-embedded; no CDN or runtime build is required.
 
 ## 8. Version History
 
@@ -132,3 +146,4 @@ The following decisions require confirmation from the current code and product d
 | ------- | ---------- | ------------------------------------------------------------------------------------------------------------------------ |
 | v1.0    | 2026-10-03 | Initial requirements baseline created from the product brief and current repository structure.                           |
 | v1.1    | 2026-10-03 | Resolved dashboard frontend technology (Tailwind + daisyUI via CDN); recorded log-separation rule for instance consoles. |
+| v1.2    | 2026-11-17 | Added server-side run-aware log history, resumable batched SSE, ANSI rendering, vendored offline Tailwind/daisyUI, active shared-services TUI, and FR-10 stream resumability. |

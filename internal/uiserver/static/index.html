@@ -1,103 +1,255 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en">
     <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>DevProxy</title>
-        <link
-            rel="stylesheet"
-            href="https://cdn.jsdelivr.net/npm/daisyui@4.12.14/dist/full.min.css"
-        />
-        <script src="https://cdn.tailwindcss.com"></script>
+        <meta name="color-scheme" content="light dark" />
+        <link rel="icon" href="data:," />
+        <title>DevProxy · local control room</title>
+        <script>
+            // Apply the persisted theme before first paint to avoid a flash.
+            (function () {
+                try {
+                    var theme = localStorage.getItem("devproxy-theme") || "system";
+                    if (theme === "light" || theme === "dark") {
+                        document.documentElement.setAttribute("data-theme", theme);
+                    }
+                } catch (error) {
+                    /* Storage can be unavailable in private modes. */
+                }
+            })();
+        </script>
+        <link rel="stylesheet" href="/static/vendor.css" />
         <link rel="stylesheet" href="/static/app.css" />
     </head>
-    <body class="min-h-screen bg-base-200">
-        <div class="navbar bg-base-100 shadow-md">
-            <div class="navbar-start gap-2">
-                <span class="text-xl font-bold">DevProxy</span>
-                <span class="badge badge-ghost">control room</span>
-            </div>
-            <div class="navbar-end">
-                <span id="status" class="badge badge-outline">connecting…</span>
-            </div>
-        </div>
+    <body class="min-h-screen bg-base-200 text-base-content antialiased">
+        <header
+            class="sticky top-0 z-30 border-b border-base-300 bg-base-100/95 shadow-sm backdrop-blur"
+        >
+            <div class="mx-auto flex w-full max-w-[1600px] items-center gap-3 px-3 py-2 sm:px-4 lg:px-6">
+                <div class="flex min-w-0 items-center gap-3">
+                    <span class="brand-mark" aria-hidden="true">DP</span>
+                    <div class="min-w-0">
+                        <h1 class="truncate text-base font-bold leading-tight sm:text-lg">
+                            DevProxy
+                        </h1>
+                        <p class="hidden text-xs text-base-content/60 sm:block">
+                            Local control room · not a production gateway
+                        </p>
+                    </div>
+                </div>
 
-        <main class="mx-auto max-w-7xl space-y-4 p-4 lg:p-6">
-            <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                <figure class="stat bg-base-100 shadow">
-                    <div class="stat-title">Managed processes</div>
-                    <div class="stat-value" id="process-count">—</div>
-                    <div class="stat-desc">configured instances</div>
-                </figure>
-                <figure class="stat bg-base-100 shadow">
-                    <div class="stat-title">Live now</div>
-                    <div class="stat-value text-success" id="running-count">
-                        —
-                    </div>
-                    <div class="stat-desc">currently running</div>
-                </figure>
-                <figure class="stat bg-base-100 shadow">
-                    <div class="stat-title">Event stream</div>
-                    <div class="stat-value">SSE</div>
-                    <div class="stat-desc">real-time updates</div>
-                </figure>
-            </div>
-
-            <div
-                class="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(280px,1fr)_2fr]"
-            >
-                <section class="rounded-box bg-base-100 shadow">
-                    <div
-                        class="flex items-center justify-between border-b border-base-300 p-4"
-                    >
-                        <div>
-                            <h2 class="font-semibold">Instances</h2>
-                            <p class="text-xs text-base-content/60">
-                                Lifecycle state and controls
-                            </p>
-                        </div>
-                        <button id="refresh" class="btn btn-ghost btn-sm">
-                            Refresh
-                        </button>
-                    </div>
-                    <div id="processes" class="space-y-2 p-3">
-                        <div class="text-sm text-base-content/50">
-                            Loading processes…
-                        </div>
-                    </div>
-                </section>
-
-                <section class="rounded-box bg-base-100 shadow">
-                    <div
-                        class="flex items-center justify-between border-b border-base-300 p-4"
-                    >
-                        <div>
-                            <h2 class="font-semibold" id="terminal-title">
-                                Instance output
-                            </h2>
-                            <p class="text-xs text-base-content/60">
-                                Process output is kept separate from proxy
-                                routing logs.
-                            </p>
-                        </div>
-                        <button id="clear" class="btn btn-ghost btn-sm">
-                            Clear
-                        </button>
-                    </div>
-                    <div
-                        id="tabs"
-                        class="tabs tabs-bordered px-4 pt-3"
-                        role="tablist"
-                    ></div>
-                    <pre
-                        id="events"
-                        class="terminal m-4 rounded-xl p-4 text-xs"
+                <div class="ml-auto flex items-center gap-2">
+                    <span
+                        id="status"
+                        class="badge badge-outline gap-1.5 whitespace-nowrap"
+                        data-state="connecting"
+                        role="status"
                         aria-live="polite"
-                    ></pre>
+                    >
+                        <span class="status-dot" aria-hidden="true"></span>
+                        <span id="status-text">connecting</span>
+                    </span>
+
+                    <label class="flex items-center gap-1.5 text-xs text-base-content/60">
+                        <span class="sr-only">Theme</span>
+                        <select
+                            id="theme"
+                            class="select select-bordered select-xs"
+                            aria-label="Color theme"
+                        >
+                            <option value="system">System</option>
+                            <option value="light">Light</option>
+                            <option value="dark">Dark</option>
+                        </select>
+                    </label>
+
+                    <button
+                        id="refresh"
+                        class="btn btn-ghost btn-sm btn-square"
+                        type="button"
+                        aria-label="Refresh process list"
+                        title="Refresh process list"
+                    >
+                        <svg viewBox="0 0 24 24" class="size-4" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                            <path d="M20 11a8.1 8.1 0 0 0-15.5-3M4 4v4h4M4 13a8.1 8.1 0 0 0 15.5 3M20 20v-4h-4" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <main class="mx-auto w-full max-w-[1600px] space-y-3 p-3 sm:space-y-4 sm:p-4 lg:p-6">
+            <section class="grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4" aria-label="Overview">
+                <div class="stat-card">
+                    <p class="stat-label">Managed</p>
+                    <p id="process-count" class="stat-value">—</p>
+                    <p class="stat-hint">configured instances</p>
+                </div>
+                <div class="stat-card">
+                    <p class="stat-label">Running</p>
+                    <p id="running-count" class="stat-value text-success">—</p>
+                    <p class="stat-hint">live processes</p>
+                </div>
+                <div class="stat-card">
+                    <p class="stat-label">Failing</p>
+                    <p id="error-count" class="stat-value text-error">—</p>
+                    <p class="stat-hint">needs attention</p>
+                </div>
+                <div class="stat-card">
+                    <p class="stat-label">Routes</p>
+                    <p id="route-count" class="stat-value">—</p>
+                    <p class="stat-hint">proxy targets</p>
+                </div>
+            </section>
+
+            <div class="grid min-w-0 gap-3 sm:gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
+                <aside class="flex min-w-0 flex-col gap-3 sm:gap-4">
+                    <section class="panel">
+                        <div class="panel-head">
+                            <div>
+                                <h2 class="panel-title">Instances</h2>
+                                <p class="panel-hint">Select to inspect · actions apply to selection</p>
+                            </div>
+                            <span id="instances-badge" class="badge badge-ghost badge-sm">0</span>
+                        </div>
+                        <div id="processes" class="instance-list" aria-label="Managed processes">
+                            <p class="empty-note">Loading processes…</p>
+                        </div>
+                    </section>
+
+                    <section class="panel">
+                        <div class="panel-head">
+                            <div>
+                                <h2 class="panel-title">Routes</h2>
+                                <p class="panel-hint">Local proxy targets</p>
+                            </div>
+                        </div>
+                        <div id="routes" class="route-list" aria-label="Proxy routes">
+                            <p class="empty-note">Loading routes…</p>
+                        </div>
+                    </section>
+                </aside>
+
+                <section class="panel flex min-w-0 flex-col overflow-hidden">
+                    <div class="panel-head flex-wrap gap-3">
+                        <div class="min-w-0">
+                            <div class="flex min-w-0 flex-wrap items-center gap-2">
+                                <h2 id="terminal-title" class="panel-title truncate">
+                                    Instance output
+                                </h2>
+                                <span id="process-state" class="badge badge-ghost badge-sm">idle</span>
+                            </div>
+                            <p id="process-meta" class="panel-hint truncate">
+                                No instance selected
+                            </p>
+                        </div>
+
+                        <div id="process-actions" class="flex shrink-0 items-center gap-1.5">
+                            <button id="action-start" class="btn btn-primary btn-xs sm:btn-sm" type="button">
+                                Start
+                            </button>
+                            <button id="action-restart" class="btn btn-xs sm:btn-sm" type="button">
+                                Restart
+                            </button>
+                            <button id="action-stop" class="btn btn-error btn-outline btn-xs sm:btn-sm" type="button">
+                                Stop
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="log-toolbar">
+                        <div id="tabs" class="view-tabs" role="tablist" aria-label="Output view">
+                            <button type="button" class="view-tab" role="tab" data-view="stdout" aria-selected="true">stdout</button>
+                            <button type="button" class="view-tab" role="tab" data-view="stderr" aria-selected="false">stderr</button>
+                            <button type="button" class="view-tab" role="tab" data-view="lifecycle" aria-selected="false">lifecycle</button>
+                            <button type="button" class="view-tab" role="tab" data-view="proxy" aria-selected="false">proxy</button>
+                        </div>
+
+                        <div class="ml-auto flex min-w-0 flex-1 flex-wrap items-center justify-end gap-1.5">
+                            <label class="run-select-wrap">
+                                <span class="sr-only">Process run</span>
+                                <select id="run-select" class="select select-bordered select-xs max-w-[15rem]" aria-label="Process run">
+                                    <option value="live">Live (current run)</option>
+                                </select>
+                            </label>
+
+                            <label class="search-wrap">
+                                <span class="sr-only">Filter lines</span>
+                                <svg viewBox="0 0 24 24" class="search-icon" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                    <circle cx="11" cy="11" r="7"></circle>
+                                    <path d="m20 20-3.5-3.5" stroke-linecap="round"></path>
+                                </svg>
+                                <input
+                                    id="search"
+                                    type="search"
+                                    class="input input-bordered input-xs search-input"
+                                    placeholder="Filter lines…"
+                                    autocomplete="off"
+                                    spellcheck="false"
+                                />
+                            </label>
+
+                            <button id="copy" class="btn btn-ghost btn-xs" type="button" title="Copy visible lines">
+                                Copy
+                            </button>
+                            <button id="clear" class="btn btn-ghost btn-xs" type="button" title="Clear this view (server history is unchanged)">
+                                Clear view
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="log-shell">
+                        <div
+                            id="log-scroller"
+                            class="log-scroller"
+                            tabindex="0"
+                            role="log"
+                            aria-label="Selected output log"
+                            aria-live="off"
+                        >
+                            <div id="log-spacer-top" class="log-spacer" aria-hidden="true"></div>
+                            <div id="log-rows" class="log-rows"></div>
+                            <div id="log-spacer-bottom" class="log-spacer" aria-hidden="true"></div>
+                            <p id="log-empty" class="log-empty">No output in this view yet.</p>
+                        </div>
+
+                        <button
+                            id="jump-live"
+                            class="btn btn-primary btn-sm jump-live"
+                            type="button"
+                            hidden
+                        >
+                            Jump to live
+                            <svg viewBox="0 0 24 24" class="size-4" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                <path d="M12 5v14M5 12l7 7 7-7" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                        </button>
+                    </div>
+
+                    <div class="log-status">
+                        <span id="log-stats">0 lines</span>
+                        <span id="search-stats" class="hidden"></span>
+                        <span class="ml-auto inline-flex items-center gap-1.5">
+                            <span id="stream-dot" class="stream-dot" aria-hidden="true"></span>
+                            <span id="stream-state">connecting…</span>
+                            <span class="opacity-40" aria-hidden="true">·</span>
+                            <span id="stream-sequence">seq 0</span>
+                        </span>
+                    </div>
                 </section>
             </div>
+
+            <footer class="flex flex-wrap items-center gap-x-3 gap-y-1 px-1 pb-2 text-xs text-base-content/50">
+                <span>In-memory history · 5,000 lines per process, current + previous run.</span>
+                <span class="hidden sm:inline">Reloads resume from server history.</span>
+                <span class="ml-auto">Local development only. Not a security boundary.</span>
+            </footer>
         </main>
 
+        <div id="toast" class="toast-note" role="status" aria-live="polite" hidden></div>
+
+        <script src="/static/ansi.js"></script>
         <script src="/static/app.js"></script>
     </body>
 </html>

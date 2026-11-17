@@ -483,7 +483,11 @@ func versionFromConfig(path string) string {
 		}
 		if strings.HasPrefix(trimmed, "version:") {
 			value := strings.TrimSpace(strings.TrimPrefix(trimmed, "version:"))
-			return strings.TrimSpace(strings.Trim(value, "\"'"))
+			value = strings.TrimSpace(strings.Trim(value, "\"'"))
+			if !validVersion(value) {
+				return ""
+			}
+			return value
 		}
 	}
 	return ""

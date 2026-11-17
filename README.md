@@ -22,6 +22,7 @@ pnpm start:dev
 
 ```sh
 devproxy up --config config.yaml              # start processes, proxy, and web UI
+devproxy up --config config.yaml --tui        # start the terminal UI instead
 devproxy process list --config config.yaml    # list process status through the UI API
 devproxy process start frontend
 devproxy process stop frontend
@@ -37,7 +38,22 @@ devproxy help
 devproxy --config config.yaml
 ```
 
-`--tui` is accepted but currently falls back to normal terminal logs while the real TUI is still planned.
+`--tui` starts the terminal UI instead of plain terminal logs, and both the TUI and dashboard share the same process manager and event bus. Use `--no-tui` or `--no-ui` to disable either surface.
+
+## Terminal UI
+
+```sh
+devproxy up --tui
+```
+
+The TUI shows process state and run-aware logs side by side. It enforces a minimum of 72×16, reflows on resize, and supports:
+
+```text
+↑/↓ or j/k   move selection        s / x / r   start / stop / restart
+v            switch log view       [ / ]       older / newer run
+/            filter lines          c           clear the current view
+?            toggle help           q / ctrl+c  quit and stop children
+```
 
 ## Web UI
 
@@ -45,8 +61,10 @@ The UI server runs on `server.ui`. It currently provides:
 
 - process cards with state, PID, exit code, working directory, and last error,
 - start/stop/restart buttons for each configured process,
-- event tabs for `All`, `Proxy`, `Process`, `Stdout`, `Stderr`, `Errors`, plus one tab per configured process such as `frontend` or `backend`,
-- terminal-style colored event output streamed from `/events`.
+- separate `stdout`, `stderr`, `lifecycle`, and `proxy` views with run/clear separators,
+- ANSI-styled, virtualized log output that restores server-side history after a reload or reconnect,
+- run selection (current/previous), visible-text filtering, copy, clear-view, light/dark/system themes, and a responsive layout,
+- live event batches streamed from `/events` with SSE resume support.
 
 The UI files are embedded from:
 
@@ -54,16 +72,23 @@ The UI files are embedded from:
 internal/uiserver/static/index.html
 internal/uiserver/static/app.css
 internal/uiserver/static/app.js
+internal/uiserver/static/ansi.js
+internal/uiserver/static/vendor.css
 ```
 
 ## Process Control API
 
 ```http
 GET  /api/processes
+GET  /api/processes/{name}/logs?run=current|previous|<id>&limit=1000&before=<seq>
 POST /api/processes/{name}/start
 POST /api/processes/{name}/stop
 POST /api/processes/{name}/restart
+GET  /api/routes
+GET  /events
 ```
+
+`/events` sends one `devproxy` SSE event per ~100 ms batch, carries the last sequence as `id`, and accepts `Last-Event-ID` to replay retained history without duplicates. Log history is in memory (5,000 lines per process, current + previous run) and ends when the host process exits.
 
 ## Bootstrapper
 
@@ -143,14 +168,8 @@ The `v1` channel release is what the current bootstrapper uses. This lets projec
 
 ## Planned Features
 
-- Reverse proxy with path-based routing.
-- Project-level `config.yaml` that can be committed to each repo.
-- Process manager for frontend, backend, and any other local services.
-- Combined service logs.
-- Web UI for service status and logs.
-- Full TUI mode, for example `devproxy up --tui`.
-- Real TUI mode.
 - Health checks for managed processes.
+- Optional configuration for log capacity and run retention.
 - Request history storage for the UI.
 
 ## Example Config Direction
@@ -197,17 +216,18 @@ This project currently has:
 - reverse proxy routing,
 - process startup/shutdown from `processes`,
 - process start/stop/restart controls,
-- stdout/stderr process log capture,
-- process status tracking,
-- process status API at `/api/processes`,
-- request and process event streaming,
-- embedded web dashboard with process cards and event tabs,
+- stdout/stderr process log capture with ANSI rendering,
+- run-aware in-memory log history (current + previous run),
+- process status API at `/api/processes` and paged logs at `/api/processes/{name}/logs`,
+- batched, resumable request and process event streaming,
+- offline embedded web dashboard with a virtualized log view,
+- shared-services terminal UI (`devproxy up --tui`),
 - CLI process control commands,
 - checksum-verifying bootstrapper command under `cmd/devproxy-bootstrap`,
 - GitHub release workflow,
-- route matching, event bus, config, process, and UI API tests.
+- route matching, event bus, config, process, log store, TUI, and UI API tests.
 
-The next recommended step is to add health checks for managed processes, then build the real TUI.
+The next recommended step is to add health checks for managed processes.
 
 ## How to Build
 

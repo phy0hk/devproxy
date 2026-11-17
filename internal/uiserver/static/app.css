@@ -1,41 +1,640 @@
-.terminal {
-    min-height: 360px;
-    max-height: 60vh;
+/* DevProxy dashboard styling. Tailwind + daisyUI are vendored in vendor.css. */
+
+:root {
+    /* Keep in sync with ROW_HEIGHT in app.js. */
+    --row-height: 22px;
+    --log-height: clamp(320px, 58vh, 760px);
+    --mono:
+        ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+        monospace;
+}
+
+html,
+body {
+    min-height: 100%;
+}
+
+body {
+    font-family:
+        ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica,
+        Arial, sans-serif;
+}
+
+.brand-mark {
+    display: inline-flex;
+    height: 2.25rem;
+    width: 2.25rem;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.75rem;
+    background: linear-gradient(140deg, var(--color-primary), var(--color-info));
+    color: var(--color-primary-content);
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: -0.04em;
+    box-shadow: 0 6px 18px -10px var(--color-primary);
+}
+
+.stat-card {
+    border: 1px solid var(--color-base-300);
+    border-radius: var(--radius-box);
+    background: var(--color-base-100);
+    padding: 0.7rem 0.85rem;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+}
+
+.stat-label {
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: color-mix(in oklab, var(--color-base-content) 55%, transparent);
+}
+
+.stat-value {
+    margin-top: 0.1rem;
+    font-family: var(--mono);
+    font-size: 1.35rem;
+    font-weight: 700;
+    line-height: 1.2;
+    font-variant-numeric: tabular-nums;
+}
+
+.stat-hint {
+    font-size: 0.68rem;
+    color: color-mix(in oklab, var(--color-base-content) 45%, transparent);
+}
+
+.panel {
+    min-width: 0;
+    border: 1px solid var(--color-base-300);
+    border-radius: var(--radius-box);
+    background: var(--color-base-100);
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.05);
+}
+
+.panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    border-bottom: 1px solid var(--color-base-300);
+    padding: 0.8rem 0.95rem;
+}
+
+.panel-title {
+    font-size: 0.92rem;
+    font-weight: 650;
+    line-height: 1.3;
+}
+
+.panel-hint {
+    margin-top: 0.1rem;
+    font-size: 0.7rem;
+    color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
+}
+
+.empty-note {
+    padding: 1rem 0.95rem;
+    font-size: 0.8rem;
+    color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
+}
+
+/* Instance list ---------------------------------------------------------- */
+
+.instance-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    max-height: 42vh;
+    overflow-y: auto;
+    padding: 0.55rem;
+    scrollbar-gutter: stable;
+}
+
+@media (min-width: 1280px) {
+    .instance-list {
+        max-height: 52vh;
+    }
+}
+
+.instance-item {
+    position: relative;
+    display: block;
+    width: 100%;
+    border: 1px solid transparent;
+    border-radius: calc(var(--radius-box) - 4px);
+    background: var(--color-base-200);
+    padding: 0.55rem 0.65rem;
+    text-align: left;
+    cursor: pointer;
+    transition:
+        border-color 120ms ease,
+        background-color 120ms ease,
+        transform 120ms ease;
+}
+
+.instance-item:hover {
+    border-color: color-mix(in oklab, var(--color-primary) 45%, transparent);
+    background: color-mix(in oklab, var(--color-base-200) 80%, var(--color-primary) 7%);
+}
+
+.instance-item:active {
+    transform: translateY(1px);
+}
+
+.instance-item.is-selected {
+    border-color: var(--color-primary);
+    background: color-mix(in oklab, var(--color-base-200) 78%, var(--color-primary) 14%);
+}
+
+.instance-item:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+}
+
+.instance-top {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+
+.instance-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.83rem;
+    font-weight: 650;
+}
+
+.instance-command {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin-top: 0.15rem;
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    color: color-mix(in oklab, var(--color-base-content) 58%, transparent);
+}
+
+.instance-meta {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin-top: 0.1rem;
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    color: color-mix(in oklab, var(--color-base-content) 42%, transparent);
+}
+
+.instance-meta.is-error {
+    color: var(--color-error);
+}
+
+.instance-meta:empty {
+    display: none;
+}
+
+/* Route list ------------------------------------------------------------- */
+
+.route-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    max-height: 34vh;
+    overflow-y: auto;
+    padding: 0.55rem;
+}
+
+.route-item {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.15rem 0.5rem;
+    border-radius: calc(var(--radius-box) - 6px);
+    background: var(--color-base-200);
+    padding: 0.45rem 0.6rem;
+}
+
+.route-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.78rem;
+    font-weight: 600;
+}
+
+.route-path {
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    color: var(--color-primary);
+}
+
+.route-upstream {
+    grid-column: 1 / -1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
+}
+
+.route-count {
+    align-self: start;
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    color: color-mix(in oklab, var(--color-base-content) 55%, transparent);
+    font-variant-numeric: tabular-nums;
+}
+
+/* Tabs and toolbar ------------------------------------------------------- */
+
+.log-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    border-bottom: 1px solid var(--color-base-300);
+    padding: 0.55rem 0.75rem;
+    background: color-mix(in oklab, var(--color-base-100) 88%, var(--color-base-200));
+}
+
+.view-tabs {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.15rem;
+    padding: 0.15rem;
+    border-radius: 999px;
+    background: var(--color-base-200);
+}
+
+.view-tab {
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    padding: 0.25rem 0.65rem;
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    color: color-mix(in oklab, var(--color-base-content) 58%, transparent);
+    cursor: pointer;
+    transition:
+        background-color 120ms ease,
+        color 120ms ease;
+}
+
+.view-tab:hover {
+    color: var(--color-base-content);
+}
+
+.view-tab[aria-selected="true"] {
+    background: var(--color-base-100);
+    color: var(--color-base-content);
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.12);
+}
+
+.view-tab:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 1px;
+}
+
+.run-select-wrap,
+.search-wrap {
+    position: relative;
+    display: inline-flex;
+    min-width: 0;
+    align-items: center;
+}
+
+.search-wrap {
+    flex: 0 1 14rem;
+}
+
+.search-icon {
+    position: absolute;
+    left: 0.5rem;
+    z-index: 1;
+    height: 0.8rem;
+    width: 0.8rem;
+    color: color-mix(in oklab, var(--color-base-content) 45%, transparent);
+    pointer-events: none;
+}
+
+.search-input {
+    width: 100%;
+    min-width: 7rem;
+    padding-left: 1.6rem;
+    font-family: var(--mono);
+    font-size: 0.7rem;
+}
+
+/* Log shell -------------------------------------------------------------- */
+
+.log-shell {
+    position: relative;
+    min-height: 0;
+    flex: 1;
+}
+
+.log-scroller {
+    position: relative;
+    height: var(--log-height);
     overflow: auto;
+    overscroll-behavior: contain;
+    overflow-anchor: none;
     background: #020617;
     color: #cbd5e1;
-    font-family:
-        ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    line-height: 1.7;
-    white-space: pre-wrap;
-    word-break: break-word;
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    line-height: var(--row-height);
+    scrollbar-gutter: stable;
+    outline: none;
 }
 
-.terminal-line {
-    padding: 1px 0;
+.log-scroller:focus-visible {
+    box-shadow: inset 0 0 0 2px var(--color-primary);
 }
 
-.terminal-line.stdout {
+.log-spacer {
+    width: 100%;
+    min-height: 0;
+    pointer-events: none;
+}
+
+.log-rows {
+    width: max-content;
+    min-width: 100%;
+}
+
+.log-row {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+    height: var(--row-height);
+    padding: 0 0.75rem;
+    white-space: pre;
+}
+
+.log-row:hover {
+    background: rgb(148 163 184 / 0.08);
+}
+
+.log-row.log-separator {
+    justify-content: center;
+    color: #94a3b8;
+    background: rgb(148 163 184 / 0.06);
+}
+
+.log-row.log-separator.log-clear {
+    color: #fbbf24;
+}
+
+.log-separator-label {
+    flex: 1;
+    overflow: hidden;
+    text-align: center;
+    text-overflow: ellipsis;
+    font-size: 0.68rem;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+}
+
+.log-time {
+    flex: none;
+    width: 5.3rem;
+    color: #64748b;
+    font-variant-numeric: tabular-nums;
+}
+
+.log-content {
+    min-width: 0;
+}
+
+.log-row.stdout .log-content {
     color: #d1fae5;
 }
 
-.terminal-line.stderr {
+.log-row.stderr .log-content {
     color: #fda4af;
 }
 
-.terminal-line.lifecycle {
+.log-row.lifecycle .log-content {
     color: #bfdbfe;
 }
 
-.terminal-line.proxy {
+.log-row.proxy .log-content {
     color: #fde68a;
 }
 
-.terminal-time {
-    color: #64748b;
-    margin-right: 10px;
+.log-detail {
+    color: #94a3b8;
 }
 
-.terminal-empty {
+.log-method {
+    color: #7dd3fc;
+    font-weight: 600;
+}
+
+.log-path {
+    color: #e2e8f0;
+}
+
+.log-status-ok {
+    color: #86efac;
+    font-weight: 600;
+}
+
+.log-status-warn {
+    color: #fcd34d;
+    font-weight: 600;
+}
+
+.log-status-error {
+    color: #fca5a5;
+    font-weight: 600;
+}
+
+.log-duration {
+    color: #94a3b8;
+}
+
+.log-upstream {
     color: #64748b;
+}
+
+.log-row mark {
+    border-radius: 2px;
+    background: #facc15;
+    color: #111827;
+    padding: 0 1px;
+}
+
+.log-empty {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    color: #64748b;
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    text-align: center;
+    pointer-events: none;
+}
+
+.jump-live {
+    position: absolute;
+    right: 0.9rem;
+    bottom: 0.9rem;
+    z-index: 2;
+    gap: 0.35rem;
+    box-shadow: 0 8px 24px -8px rgb(0 0 0 / 0.6);
+}
+
+.log-status {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    border-top: 1px solid var(--color-base-300);
+    padding: 0.4rem 0.75rem;
+    font-family: var(--mono);
+    font-size: 0.66rem;
+    color: color-mix(in oklab, var(--color-base-content) 52%, transparent);
+}
+
+.stream-dot {
+    height: 0.45rem;
+    width: 0.45rem;
+    flex: none;
+    border-radius: 999px;
+    background: var(--color-warning);
+}
+
+[data-stream="connected"] .stream-dot {
+    background: var(--color-success);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--color-success) 20%, transparent);
+}
+
+[data-stream="disconnected"] .stream-dot {
+    background: var(--color-error);
+}
+
+/* Header status ---------------------------------------------------------- */
+
+.status-dot {
+    height: 0.45rem;
+    width: 0.45rem;
+    border-radius: 999px;
+    background: var(--color-warning);
+}
+
+#status[data-state="connected"] .status-dot {
+    background: var(--color-success);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--color-success) 22%, transparent);
+}
+
+#status[data-state="disconnected"] .status-dot {
+    background: var(--color-error);
+}
+
+#status[data-state="connecting"] .status-dot {
+    animation: status-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes status-pulse {
+    0%,
+    100% {
+        opacity: 0.35;
+    }
+    50% {
+        opacity: 1;
+    }
+}
+
+/* Toast ------------------------------------------------------------------ */
+
+.toast-note {
+    position: fixed;
+    right: 1rem;
+    bottom: 1rem;
+    z-index: 50;
+    max-width: min(92vw, 26rem);
+    border: 1px solid var(--color-base-300);
+    border-radius: var(--radius-field);
+    background: var(--color-base-100);
+    padding: 0.55rem 0.8rem;
+    font-size: 0.78rem;
+    box-shadow: 0 12px 32px -12px rgb(0 0 0 / 0.5);
+}
+
+/* Scrollbars ------------------------------------------------------------- */
+
+.log-scroller,
+.instance-list,
+.route-list {
+    scrollbar-width: thin;
+    scrollbar-color: #334155 transparent;
+}
+
+.log-scroller::-webkit-scrollbar,
+.instance-list::-webkit-scrollbar,
+.route-list::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+.log-scroller::-webkit-scrollbar-thumb,
+.instance-list::-webkit-scrollbar-thumb,
+.route-list::-webkit-scrollbar-thumb {
+    border: 3px solid transparent;
+    border-radius: 999px;
+    background-clip: content-box;
+    background-color: #475569;
+}
+
+/* Responsive ------------------------------------------------------------- */
+
+@media (max-width: 639px) {
+    :root {
+        --log-height: 56vh;
+    }
+
+    .panel-head {
+        padding: 0.7rem 0.75rem;
+    }
+
+    .log-toolbar {
+        padding: 0.5rem;
+    }
+
+    .search-wrap {
+        flex: 1 1 100%;
+    }
+
+    .log-time {
+        width: 4.4rem;
+    }
+
+    .log-row {
+        padding: 0 0.5rem;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
 }

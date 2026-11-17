@@ -7,8 +7,12 @@ import (
 
 var sequence uint64
 
-func NextID() string {
-	id := atomic.AddUint64(&sequence, 1)
+// NextSequence returns the next process-wide monotonic stream sequence.
+func NextSequence() uint64 {
+	return atomic.AddUint64(&sequence, 1)
+}
 
-	return strconv.FormatUint(id, 10)
+// NextID returns a string form of the next stream sequence.
+func NextID() string {
+	return strconv.FormatUint(NextSequence(), 10)
 }

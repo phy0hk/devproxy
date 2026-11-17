@@ -3,13 +3,47 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/phy0hk/devproxy/internal/config"
+	"github.com/phy0hk/devproxy/internal/logstore"
 	"github.com/phy0hk/devproxy/internal/process"
 )
+
+// routeInfo is the dashboard-safe view of one configured proxy target.
+type routeInfo struct {
+	Name     string `json:"name"`
+	Path     string `json:"path"`
+	Upstream string `json:"upstream"`
+	Rewrite  bool   `json:"rewrite"`
+}
+
+func handleRoutes(cfg *config.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		routes := make([]routeInfo, 0, len(cfg.Proxy.Targets))
+		for _, target := range cfg.Proxy.Targets {
+			routes = append(routes, routeInfo{
+				Name:     target.Name,
+				Path:     target.Path,
+				Upstream: target.URL,
+				Rewrite:  target.Rewrite,
+			})
+		}
+
+		writeJSON(w, routes)
+	}
+}
 
 func handleProcessStatuses(manager *process.Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -25,15 +59,25 @@ func handleProcessStatuses(manager *process.Manager) http.HandlerFunc {
 
 func handleProcessAction(manager *process.Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			w.Header().Set("Allow", http.MethodPost)
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-
 		name, action, ok := parseProcessActionPath(r.URL.Path)
 		if !ok {
 			http.NotFound(w, r)
+			return
+		}
+
+		if action == "logs" {
+			if r.Method != http.MethodGet {
+				w.Header().Set("Allow", http.MethodGet)
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			handleProcessLogs(w, r, manager, name)
+			return
+		}
+
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", http.MethodPost)
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 
@@ -60,6 +104,52 @@ func handleProcessAction(manager *process.Manager) http.HandlerFunc {
 
 		writeJSON(w, manager.Statuses())
 	}
+}
+
+func handleProcessLogs(
+	w http.ResponseWriter,
+	r *http.Request,
+	manager *process.Manager,
+	name string,
+) {
+	query := r.URL.Query()
+	run := query.Get("run")
+
+	limit := 1000
+	if rawLimit := query.Get("limit"); rawLimit != "" {
+		parsed, err := strconv.Atoi(rawLimit)
+		if err != nil || parsed < 1 {
+			http.Error(w, "limit must be a positive integer", http.StatusBadRequest)
+			return
+		}
+		limit = parsed
+	}
+
+	before := uint64(0)
+	rawBefore := query.Get("before")
+	if rawBefore == "" {
+		rawBefore = query.Get("before-sequence")
+	}
+	if rawBefore != "" {
+		parsed, err := strconv.ParseUint(rawBefore, 10, 64)
+		if err != nil {
+			http.Error(w, "before must be an unsigned integer", http.StatusBadRequest)
+			return
+		}
+		before = parsed
+	}
+
+	result, err := manager.Logs(name, run, limit, before)
+	if err != nil {
+		if errors.Is(err, logstore.ErrRunNotFound) {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	writeJSON(w, result)
 }
 
 func parseProcessActionPath(path string) (string, string, bool) {

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/phy0hk/devproxy/internal/config"
+	"github.com/phy0hk/devproxy/internal/event"
 )
 
 func TestManagerInitialStatuses(t *testing.T) {
@@ -232,4 +233,194 @@ func TestManagerStartFailureUpdatesStatus(t *testing.T) {
 	if !strings.Contains(err.Error(), "start process") {
 		t.Fatalf("error = %q, want start process context", err.Error())
 	}
+}
+
+func TestManagerRunIDsChangeAcrossRestart(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses POSIX shell command")
+	}
+
+	manager := NewManager([]config.ProcessConfig{{
+		Name:    "worker",
+		Command: "echo first; sleep 10",
+	}}, nil)
+
+	if err := manager.Start(context.Background(), "worker"); err != nil {
+		t.Fatalf("start process: %v", err)
+	}
+
+	waitForLogLine(t, manager, "worker", "first")
+	firstRunID := manager.Statuses()[0].RunID
+	if firstRunID == "" {
+		t.Fatal("expected first run ID")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := manager.Restart(ctx, "worker"); err != nil {
+		t.Fatalf("restart process: %v", err)
+	}
+	defer manager.StopAll(context.Background())
+
+	secondRunID := manager.Statuses()[0].RunID
+	if secondRunID == "" || secondRunID == firstRunID {
+		t.Fatalf("second run ID = %q, want a new ID different from %q", secondRunID, firstRunID)
+	}
+
+	previous, err := manager.Logs("worker", "previous", 10, 0)
+	if err != nil {
+		t.Fatalf("previous logs: %v", err)
+	}
+	if previous.Run != firstRunID {
+		t.Fatalf("previous run = %q, want %q", previous.Run, firstRunID)
+	}
+	if len(previous.Lines) == 0 || previous.Lines[0].Message != "first" {
+		t.Fatalf("previous lines = %v, want first output line", previous.Lines)
+	}
+	if previous.Lines[0].RunID != firstRunID {
+		t.Fatalf("line run ID = %q, want %q", previous.Lines[0].RunID, firstRunID)
+	}
+}
+
+func TestManagerKeepsStdoutAndStderrDistinct(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses POSIX shell command")
+	}
+
+	manager := NewManager([]config.ProcessConfig{{
+		Name:    "worker",
+		Command: "echo out; echo err >&2",
+	}}, nil)
+
+	if err := manager.Start(context.Background(), "worker"); err != nil {
+		t.Fatalf("start process: %v", err)
+	}
+	defer manager.StopAll(context.Background())
+
+	waitForLogCount(t, manager, "worker", 2)
+	result, err := manager.Logs("worker", "current", 10, 0)
+	if err != nil {
+		t.Fatalf("logs: %v", err)
+	}
+
+	streams := map[string]string{}
+	for _, line := range result.Lines {
+		streams[line.Message] = line.Stream
+	}
+	if streams["out"] != "stdout" {
+		t.Fatalf("out stream = %q, want stdout", streams["out"])
+	}
+	if streams["err"] != "stderr" {
+		t.Fatalf("err stream = %q, want stderr", streams["err"])
+	}
+}
+
+func TestManagerOutputSequencesIncrease(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses POSIX shell command")
+	}
+
+	manager := NewManager([]config.ProcessConfig{{
+		Name:    "worker",
+		Command: "echo one; echo two; echo three; echo four",
+	}}, nil)
+
+	if err := manager.Start(context.Background(), "worker"); err != nil {
+		t.Fatalf("start process: %v", err)
+	}
+	defer manager.StopAll(context.Background())
+
+	waitForLogCount(t, manager, "worker", 4)
+	result, err := manager.Logs("worker", "current", 10, 0)
+	if err != nil {
+		t.Fatalf("logs: %v", err)
+	}
+
+	for i := 1; i < len(result.Lines); i++ {
+		if result.Lines[i].Sequence <= result.Lines[i-1].Sequence {
+			t.Fatalf("sequences not increasing: %v", result.Lines)
+		}
+	}
+}
+
+func TestManagerStartEventsCarryRunAndSequence(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses POSIX shell command")
+	}
+
+	bus := event.NewBusWithHistory(100)
+	manager := NewManager([]config.ProcessConfig{{
+		Name:    "worker",
+		Command: "echo hello",
+	}}, bus)
+
+	if err := manager.Start(context.Background(), "worker"); err != nil {
+		t.Fatalf("start process: %v", err)
+	}
+	defer manager.StopAll(context.Background())
+
+	waitForLogCount(t, manager, "worker", 1)
+
+	sub := bus.SubscribeFiltered([]event.EventType{event.TypeProcessStarted, event.TypeProcessOutput})
+	defer bus.Unsubscribe(sub)
+
+	var started, output *event.ProcessEvent
+	deadline := time.After(2 * time.Second)
+	for started == nil || output == nil {
+		select {
+		case item := <-sub:
+			processEvent, ok := item.(event.ProcessEvent)
+			if !ok {
+				continue
+			}
+			switch processEvent.Type() {
+			case event.TypeProcessStarted:
+				started = &processEvent
+			case event.TypeProcessOutput:
+				output = &processEvent
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for events")
+		}
+	}
+
+	if started.RunID == "" || started.Sequence == 0 {
+		t.Fatalf("started event missing run/sequence: %+v", started)
+	}
+	if output.RunID != started.RunID {
+		t.Fatalf("output run ID = %q, want %q", output.RunID, started.RunID)
+	}
+	if output.Sequence <= started.Sequence {
+		t.Fatalf("output sequence = %d, want > started %d", output.Sequence, started.Sequence)
+	}
+}
+
+func waitForLogLine(t *testing.T, manager *Manager, name, message string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		result, err := manager.Logs(name, "current", 50, 0)
+		if err == nil {
+			for _, line := range result.Lines {
+				if line.Message == message {
+					return
+				}
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for log line %q", message)
+}
+
+func waitForLogCount(t *testing.T, manager *Manager, name string, count int) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		result, err := manager.Logs(name, "current", 50, 0)
+		if err == nil && len(result.Lines) >= count {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %d log lines", count)
 }

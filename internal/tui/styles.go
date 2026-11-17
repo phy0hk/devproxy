@@ -67,6 +67,11 @@ var (
 	proxyStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("69"))
 
+	// Separator style for run/screen-clear boundaries
+	separatorStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("244")).
+			Italic(true)
+
 	// Tab styles
 	tabStyle = lipgloss.NewStyle().
 			Padding(0, 1).
@@ -81,6 +86,12 @@ var (
 	// Help/styles
 	helpStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("244")).
+			Padding(0, 1)
+
+	// Status bar style
+	statusBarStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("244")).
+			Background(lipgloss.Color("236")).
 			Padding(0, 1)
 
 	// Title style

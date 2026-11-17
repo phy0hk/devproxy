@@ -65,6 +65,7 @@ func (l *Logger) Middleware(next http.Handler) http.Handler {
 			EventType:    event.TypeProxyRequest,
 			ID:           event.NextID(),
 			Timestamp:    start,
+			Sequence:     event.NextSequence(),
 			Method:       r.Method,
 			Path:         r.URL.RequestURI(),
 			Route:        writer.Header().Get("X-DevProxy-Route"),

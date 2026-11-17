@@ -2,32 +2,28 @@
 
 ## Current work
 
-- Migrated `.ai_context/` from the legacy memo layout to the v2 context structure and recorded project data in `AGENTS.md`.
+- Quit behavior fixed: `q` and Ctrl+C (plus server startup errors, SIGHUP) now stop every managed instance, including grandchildren of shell wrappers. The tracked `./devproxy` binary was stale and has been rebuilt from current source. Working tree changes are uncommitted.
+
+```text
+process stdout/stderr ──▶ manager ──▶ logstore (5,000 lines, current+previous run)
+                              │
+                              └──▶ event bus ──▶ SSE batch (100 ms, resumable)
+                                                    ├──▶ dashboard (virtualized, ANSI)
+                                                    └──▶ TUI (Bubble Tea, shared services)
+```
 
 ## Done
 
-- Added `RULES.md` (non-negotiable constraints).
-- Created `.ai_context/memory/CHRONICLE.md`; archived legacy memos to `.ai_context/memory/archives/`.
-- Added `.ai_context/CAPABILITY-MAP.md`.
-- Rewrote `.ai_context/MANIFEST.md` in the v2 format.
-- Filled the `AGENTS.md` project context with the project name, requirements, and related data.
-- Added this `TLDR.md`.
-
-## Structure
-
-```text
-RULES.md                     # non-negotiable constraints
-TLDR.md                      # this file
-AGENTS.md                    # workflow + project context
-.ai_context/
-├── MANIFEST.md              # active task + liveness checklist
-├── REQUIREMENTS.md          # v1.1 requirements + architecture
-├── CAPABILITY-MAP.md        # module boundaries + capability status
-└── memory/
-    ├── CHRONICLE.md         # milestone history
-    └── archives/            # legacy memos (2026-10-03)
-```
+- Run-aware in-memory log history with `GET /api/processes/{name}/logs`.
+- Batched, resumable SSE (`id`, `Last-Event-ID`, 100 ms coalescing).
+- Dashboard rewritten with vendored offline Tailwind/daisyUI, themes, ANSI rendering, virtualized rows, run separators, search/copy, responsive + keyboard checks.
+- TUI rewritten with Bubble Tea messages, min-size/resize, run switching, filter, non-blocking actions, clean quit.
+- Event bus safe unsubscribe/replay and shared bus/manager between dashboard and TUI.
+- Whole-process-tree shutdown: instances run in their own process groups; `StopAll` sends SIGTERM then SIGKILL to the group, and `runUp` shuts down on every exit path.
+- Verification: Go tests/vet/build, Bun ANSI tests, headless-Chromium dashboard smoke, tmux TUI smoke, CPU/SSE measurements recorded in the manifest and chronicle.
 
 ## Blockers / questions
 
-- None. No application code was changed by this migration.
+- Log capacity/run retention are programmatic defaults; exposing them in `config.yaml` still needs approval.
+- The tracked `devproxy` binary is modified in the working tree; don't commit it.
+- Stopped processes exit with code `-1` (existing kill behavior).

@@ -2,6 +2,10 @@ processes:
     - name: test
       command: echo "Hello World"
       working_dir: .
+    - name: test0
+      command: echo "Hello World0"
+      working_dir: .
+
 server:
     proxy:
         host: "127.0.0.1"

@@ -29,6 +29,23 @@ type Server struct {
 
 func New(cfg *config.Config) (*Server, error) {
 	bus := event.NewBus()
+	return NewWithServices(cfg, bus, process.NewManager(cfg.Processes, bus))
+}
+
+// NewWithServices builds the HTTP server around an existing bus and process
+// manager. The dashboard and TUI must share these services so lifecycle
+// actions and output refer to the same process instances.
+func NewWithServices(
+	cfg *config.Config,
+	bus *event.Bus,
+	processManager *process.Manager,
+) (*Server, error) {
+	if bus == nil {
+		bus = event.NewBus()
+	}
+	if processManager == nil {
+		processManager = process.NewManager(cfg.Processes, bus)
+	}
 
 	requestLogger := logger.New(bus)
 	proxyServer, err := proxy.New(cfg)
@@ -44,13 +61,12 @@ func New(cfg *config.Config) (*Server, error) {
 		),
 	)
 
-	processManager := process.NewManager(cfg.Processes, bus)
-
 	var uiHTTP *http.Server
 	if cfg.Server.UI.Enabled {
 		uiMux := http.NewServeMux()
 		uiMux.Handle("/static/", handleStaticAssets())
 		uiMux.HandleFunc("/", handleDashboard)
+		uiMux.HandleFunc("/api/routes", handleRoutes(cfg))
 		uiMux.HandleFunc("/api/processes", handleProcessStatuses(processManager))
 		uiMux.HandleFunc("/api/processes/", handleProcessAction(processManager))
 		uiMux.HandleFunc(

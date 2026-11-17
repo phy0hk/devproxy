@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -108,62 +109,63 @@ func runUp(args []string) error {
 	bus := server.NewEventBus()
 	processManager := process.NewManager(cfg.Processes, bus)
 
-	var srv *server.Server
 	var tuiErrCh chan error
 
-	// Start TUI if enabled
+	// The TUI and dashboard consume the same core services.
 	if cfg.Server.TUI.Enabled {
+		// The TUI owns the terminal. Stray standard-library log writes land
+		// inside the alternate screen, scroll it, and leave stale rows behind
+		// because Bubble Tea skips unchanged lines between frames.
+		previousLogOutput := log.Writer()
+		log.SetOutput(io.Discard)
+		defer log.SetOutput(previousLogOutput)
+
 		tuiErrCh = make(chan error, 1)
 		go func() {
 			tuiErrCh <- tui.Run(cfg, processManager, bus)
 		}()
 	}
 
-	// Start web UI and proxy if enabled
-	if cfg.Server.UI.Enabled {
-		srv, err = server.New(cfg)
-		if err != nil {
-			return err
-		}
+	// The proxy always runs; the UI server is optional.
+	srv, err := server.NewWithServices(cfg, bus, processManager)
+	if err != nil {
+		return err
 	}
 
 	serverErr := make(chan error, 1)
-
-	if srv != nil {
-		go func() {
-			serverErr <- srv.Start()
-		}()
-	}
+	go func() {
+		serverErr <- srv.Start()
+	}()
 
 	signalCtx, stop := signal.NotifyContext(
 		context.Background(),
 		os.Interrupt,
 		syscall.SIGTERM,
+		syscall.SIGHUP,
 	)
 	defer stop()
 
+	var runErr error
 	select {
 	case err := <-serverErr:
-		if isNormalServerClose(err) {
-			return nil
+		if !isNormalServerClose(err) {
+			runErr = err
 		}
-		return err
-
 	case err := <-tuiErrCh:
-		if err != nil {
-			return err
-		}
-
+		// Quitting the TUI must stop managed children and close listeners.
+		runErr = err
 	case <-signalCtx.Done():
-		if srv != nil {
-			if err := srv.Shutdown(context.Background()); err != nil {
-				return fmt.Errorf("shutdown: %w", err)
-			}
-		}
-		return nil
 	}
 
-	return nil
+	// Every exit path stops managed instances and closes listeners, including
+	// a server bind failure that happens after StartAll succeeded.
+	if shutdownErr := srv.Shutdown(context.Background()); shutdownErr != nil {
+		if runErr != nil {
+			return errors.Join(runErr, fmt.Errorf("shutdown: %w", shutdownErr))
+		}
+		return fmt.Errorf("shutdown: %w", shutdownErr)
+	}
+	return runErr
 }
 
 func runProcess(args []string) error {

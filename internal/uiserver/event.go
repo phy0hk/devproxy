@@ -4,9 +4,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/phy0hk/devproxy/internal/event"
+)
+
+const (
+	// eventBatchInterval coalesces live output into at most ~10 flushes/s.
+	eventBatchInterval = 100 * time.Millisecond
+	// maxEventBatch protects memory if a client stalls between ticks.
+	maxEventBatch = 5000
 )
 
 func handleEvents(
@@ -22,6 +31,16 @@ func handleEvents(
 			http.StatusInternalServerError,
 		)
 		return
+	}
+
+	afterSequence := uint64(0)
+	if lastEventID := r.Header.Get("Last-Event-ID"); lastEventID != "" {
+		parsed, err := strconv.ParseUint(strings.TrimSpace(lastEventID), 10, 64)
+		if err != nil {
+			http.Error(w, "invalid Last-Event-ID", http.StatusBadRequest)
+			return
+		}
+		afterSequence = parsed
 	}
 
 	w.Header().Set(
@@ -49,35 +68,67 @@ func handleEvents(
 		}
 	}
 
-	subscriber := bus.SubscribeFiltered(filter)
+	subscriber := bus.SubscribeFilteredFrom(filter, afterSequence)
 	defer bus.Unsubscribe(subscriber)
 
-	fmt.Fprint(w, ": connected\n\n")
+	if _, err := fmt.Fprint(w, ": connected\n\n"); err != nil {
+		return
+	}
 	flusher.Flush()
+
+	ticker := time.NewTicker(eventBatchInterval)
+	defer ticker.Stop()
+
+	batch := make([]event.Event, 0, 256)
+	flush := func() bool {
+		if len(batch) == 0 {
+			return true
+		}
+
+		// One SSE frame per flush keeps browser work bounded: a client at
+		// ~1,000 lines/s receives about ten JSON arrays per second instead of
+		// one thousand EventSource callbacks.
+		data, err := json.Marshal(batch)
+		if err != nil {
+			batch = batch[:0]
+			return true
+		}
+
+		if sequence := event.SequenceOf(batch[len(batch)-1]); sequence > 0 {
+			if _, err := fmt.Fprintf(w, "id: %d\n", sequence); err != nil {
+				return false
+			}
+		}
+
+		if _, err := fmt.Fprintf(w, "event: devproxy\ndata: %s\n\n", data); err != nil {
+			return false
+		}
+
+		batch = batch[:0]
+		flusher.Flush()
+		return true
+	}
 
 	for {
 		select {
 		case <-r.Context().Done():
+			flush()
 			return
 
-		case entry := <-subscriber:
-			data, err := json.Marshal(entry)
-			if err != nil {
-				continue
+		case <-ticker.C:
+			if !flush() {
+				return
 			}
 
-			fmt.Fprintf(
-				w,
-				"event: devproxy\n",
-			)
+		case entry, open := <-subscriber:
+			if !open {
+				return
+			}
 
-			fmt.Fprintf(
-				w,
-				"data: %s\n\n",
-				data,
-			)
-
-			flusher.Flush()
+			batch = append(batch, entry)
+			if len(batch) >= maxEventBatch && !flush() {
+				return
+			}
 		}
 	}
 }

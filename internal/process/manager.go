@@ -12,10 +12,12 @@ import (
 	"runtime"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/phy0hk/devproxy/internal/config"
 	"github.com/phy0hk/devproxy/internal/event"
+	"github.com/phy0hk/devproxy/internal/logstore"
 )
 
 type State string
@@ -33,6 +35,7 @@ type Status struct {
 	Command    string     `json:"command"`
 	WorkingDir string     `json:"working_dir,omitempty"`
 	State      State      `json:"state"`
+	RunID      string     `json:"run_id,omitempty"`
 	PID        int        `json:"pid,omitempty"`
 	StartedAt  *time.Time `json:"started_at,omitempty"`
 	ExitedAt   *time.Time `json:"exited_at,omitempty"`
@@ -40,26 +43,46 @@ type Status struct {
 	LastError  string     `json:"last_error,omitempty"`
 }
 
+// Options bounds in-memory log history. Zero values use logstore defaults.
+type Options struct {
+	LogCapacity int
+	MaxRuns     int
+}
+
 type Manager struct {
 	configs []config.ProcessConfig
 	bus     *event.Bus
+	logs    *logstore.Store
 
 	mu       sync.Mutex
+	outputMu sync.Mutex
 	running  map[string]*runningProcess
 	statuses map[string]Status
+	runSeq   uint64
 }
 
 type runningProcess struct {
 	config config.ProcessConfig
+	runID  string
 	cmd    *exec.Cmd
 	cancel context.CancelFunc
 	done   chan struct{}
 }
 
 func NewManager(configs []config.ProcessConfig, bus *event.Bus) *Manager {
+	return NewManagerWithOptions(configs, bus, Options{})
+}
+
+// NewManagerWithOptions creates a manager with explicit log retention bounds.
+func NewManagerWithOptions(
+	configs []config.ProcessConfig,
+	bus *event.Bus,
+	options Options,
+) *Manager {
 	manager := &Manager{
 		configs:  configs,
 		bus:      bus,
+		logs:     logstore.New(logstore.Options{Capacity: options.LogCapacity, MaxRuns: options.MaxRuns}),
 		running:  make(map[string]*runningProcess),
 		statuses: make(map[string]Status, len(configs)),
 	}
@@ -100,41 +123,46 @@ func (m *Manager) Start(ctx context.Context, name string) error {
 	}
 	m.mu.Unlock()
 
+	runID := fmt.Sprintf("run-%d", atomic.AddUint64(&m.runSeq, 1))
+	startedAt := time.Now()
+	m.logs.BeginRun(name, runID, startedAt)
+
 	// Process lifetime must not be tied to the HTTP request that started it.
 	// The manager owns cancellation through Stop and StopAll.
 	processCtx, cancel := context.WithCancel(context.Background())
 	cmd := shellCommand(processCtx, processConfig.Command)
+	configureProcessGroup(cmd)
 	cmd.Dir = processConfig.WorkingDir
 	cmd.Env = processEnv(processConfig.Env)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
-		m.markFailed(name, err)
+		m.markFailed(name, runID, err)
 		return fmt.Errorf("create stdout pipe for %q: %w", name, err)
 	}
 
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		cancel()
-		m.markFailed(name, err)
+		m.markFailed(name, runID, err)
 		return fmt.Errorf("create stderr pipe for %q: %w", name, err)
 	}
 
 	if err := cmd.Start(); err != nil {
 		cancel()
-		m.markFailed(name, err)
+		m.markFailed(name, runID, err)
 		return fmt.Errorf("start process %q: %w", name, err)
 	}
 
 	running := &runningProcess{
 		config: processConfig,
+		runID:  runID,
 		cmd:    cmd,
 		cancel: cancel,
 		done:   make(chan struct{}),
 	}
 
-	now := time.Now()
 	m.mu.Lock()
 	m.running[name] = running
 	m.statuses[name] = Status{
@@ -142,22 +170,24 @@ func (m *Manager) Start(ctx context.Context, name string) error {
 		Command:    processConfig.Command,
 		WorkingDir: processConfig.WorkingDir,
 		State:      StateRunning,
+		RunID:      runID,
 		PID:        cmd.Process.Pid,
-		StartedAt:  &now,
+		StartedAt:  &startedAt,
 	}
 	m.mu.Unlock()
 
 	m.publish(event.ProcessEvent{
 		EventType: event.TypeProcessStarted,
-		Timestamp: now,
+		Timestamp: startedAt,
 		Process:   name,
+		RunID:     runID,
 		Message:   processConfig.Command,
 	})
 
 	log.Printf("process %q started: %s", name, processConfig.Command)
 
-	go m.captureOutput(name, "stdout", stdout)
-	go m.captureOutput(name, "stderr", stderr)
+	go m.captureOutput(name, runID, "stdout", stdout)
+	go m.captureOutput(name, runID, "stderr", stderr)
 	go m.wait(name, running)
 
 	return nil
@@ -232,12 +262,30 @@ func (m *Manager) Statuses() []Status {
 	return statuses
 }
 
+// Logs returns bounded, run-aware output history for a configured process.
+func (m *Manager) Logs(
+	name string,
+	run string,
+	limit int,
+	before uint64,
+) (logstore.Result, error) {
+	if _, ok := m.findConfig(name); !ok {
+		return logstore.Result{}, fmt.Errorf("process %q not found", name)
+	}
+
+	return m.logs.Query(name, run, limit, before)
+}
+
 func (m *Manager) stop(ctx context.Context, process *runningProcess) error {
 	name := process.config.Name
 
 	if process.cmd.Process == nil {
 		return nil
 	}
+
+	// Release the lifetime context once this instance is fully stopped. The
+	// group signal below owns termination of the whole process tree.
+	defer process.cancel()
 
 	now := time.Now()
 	m.mu.Lock()
@@ -255,10 +303,16 @@ func (m *Manager) stop(ctx context.Context, process *runningProcess) error {
 			EventType: event.TypeProcessStopping,
 			Timestamp: now,
 			Process:   name,
+			RunID:     process.runID,
 		})
 	}
 
-	process.cancel()
+	// The direct child is usually only a shell wrapper; the real dev server
+	// runs as one of its descendants. Signal the whole process group so every
+	// instance is stopped, not just the wrapper.
+	if err := terminateProcessGroup(process.cmd.Process, terminateGraceful); err != nil {
+		return fmt.Errorf("stop process group for %q: %w", name, err)
+	}
 
 	select {
 	case <-process.done:
@@ -266,8 +320,8 @@ func (m *Manager) stop(ctx context.Context, process *runningProcess) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-time.After(5 * time.Second):
-		if err := process.cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
-			return fmt.Errorf("kill process %q: %w", name, err)
+		if err := terminateProcessGroup(process.cmd.Process, terminateForce); err != nil {
+			return fmt.Errorf("kill process group for %q: %w", name, err)
 		}
 	}
 
@@ -279,19 +333,35 @@ func (m *Manager) stop(ctx context.Context, process *runningProcess) error {
 	}
 }
 
-func (m *Manager) captureOutput(name string, stream string, reader io.Reader) {
+func (m *Manager) captureOutput(name string, runID string, stream string, reader io.Reader) {
 	scanner := bufio.NewScanner(reader)
 	for scanner.Scan() {
 		line := scanner.Text()
 
-		m.publish(event.ProcessEvent{
-			EventType: event.TypeProcessOutput,
-			Timestamp: time.Now(),
+		// Assign the sequence inside the lock so the stored order, the
+		// published order, and the sequence order always agree when stdout
+		// and stderr are read concurrently.
+		m.outputMu.Lock()
+		timestamp := time.Now()
+		sequence := event.NextSequence()
+		m.logs.Append(logstore.Line{
 			Process:   name,
+			RunID:     runID,
+			Sequence:  sequence,
+			Timestamp: timestamp,
 			Stream:    stream,
 			Message:   line,
 		})
-
+		m.publish(event.ProcessEvent{
+			EventType: event.TypeProcessOutput,
+			Timestamp: timestamp,
+			Process:   name,
+			RunID:     runID,
+			Sequence:  sequence,
+			Stream:    stream,
+			Message:   line,
+		})
+		m.outputMu.Unlock()
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -299,6 +369,7 @@ func (m *Manager) captureOutput(name string, stream string, reader io.Reader) {
 			EventType: event.TypeProcessOutputErr,
 			Timestamp: time.Now(),
 			Process:   name,
+			RunID:     runID,
 			Stream:    stream,
 			Error:     err.Error(),
 		})
@@ -320,6 +391,7 @@ func (m *Manager) wait(name string, process *runningProcess) {
 		EventType: event.TypeProcessExited,
 		Timestamp: now,
 		Process:   name,
+		RunID:     process.runID,
 		ExitCode:  exitCode,
 	}
 
@@ -350,6 +422,7 @@ func (m *Manager) wait(name string, process *runningProcess) {
 	}
 	m.mu.Unlock()
 
+	m.logs.EndRun(name, process.runID, now)
 	m.publish(processEvent)
 	log.Printf("process %q exited with code %d", name, exitCode)
 }
@@ -364,26 +437,33 @@ func (m *Manager) findConfig(name string) (config.ProcessConfig, bool) {
 	return config.ProcessConfig{}, false
 }
 
-func (m *Manager) markFailed(name string, err error) {
+func (m *Manager) markFailed(name string, runID string, err error) {
 	now := time.Now()
 
 	m.mu.Lock()
 	status := m.statuses[name]
 	status.State = StateFailed
+	status.RunID = runID
 	status.ExitedAt = &now
 	status.LastError = err.Error()
 	m.statuses[name] = status
 	m.mu.Unlock()
 
+	m.logs.EndRun(name, runID, now)
 	m.publish(event.ProcessEvent{
 		EventType: event.TypeProcessFailed,
 		Timestamp: now,
 		Process:   name,
+		RunID:     runID,
 		Error:     err.Error(),
 	})
 }
 
 func (m *Manager) publish(processEvent event.ProcessEvent) {
+	if processEvent.Sequence == 0 {
+		processEvent.Sequence = event.NextSequence()
+	}
+
 	if m.bus != nil {
 		m.bus.Publish(processEvent)
 	}

@@ -137,9 +137,11 @@ func validConfig() *Config {
 				Host: "127.0.0.1",
 				Port: 8080,
 			},
-			UI: ServerAddress{
-				Host: "127.0.0.1",
-				Port: 8081,
+			UI: UIConfig{
+				ServerAddress: ServerAddress{
+					Host: "127.0.0.1",
+					Port: 8081,
+				},
 			},
 		},
 		Proxy: ProxyConfig{
